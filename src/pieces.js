@@ -115,6 +115,15 @@ export function createBattleSword(hex = 0xf0d090) {
   const tip = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.034, 0.12, 4), bladeMat));
   tip.rotation.x = Math.PI / 2;
   tip.position.z = -0.82;
+  // Both cutting edges run along local ±X. A glowing strip marks each, so the
+  // player can see which way the edge faces; combat brightens them while a
+  // swing is leading with the edge.
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xffe6a0, emissiveIntensity: 0.5, roughness: 0.3 });
+  for (const side of [-1, 1]) {
+    const edge = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.014, 0.6), edgeMat));
+    edge.position.set(side * 0.0285, 0, -0.46);
+  }
+  group.userData.edgeMat = edgeMat;
   group.userData.tip = new THREE.Vector3(0, 0, -0.9);
   group.userData.base = new THREE.Vector3(0, 0, -0.14);
   return group;

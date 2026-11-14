@@ -55,6 +55,25 @@ const _tipW = new THREE.Vector3();
 const _prevTipW = new THREE.Vector3();
 const _gripW = new THREE.Vector3();
 const _wristL = new THREE.Vector3();
+const _vel = new THREE.Vector3();
+const _edge = new THREE.Vector3();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _body = new THREE.Vector3();
+const _X = new THREE.Vector3(1, 0, 0);
+const _Z = new THREE.Vector3(0, 0, 1);
+
+// The sword's rest pose: blade upright in front, tilted a little forward, with
+// an edge (local X) turned to face forward so a chop leads with the edge.
+// spin: about the blade, pitch: blade from forward (-Z) up toward +Y, lean:
+// tip toward the centre of view.
+function swordPose(out, pitch, lean, spin = Math.PI / 2) {
+  _q1.setFromAxisAngle(_Z, spin);
+  _q2.setFromAxisAngle(_X, pitch);
+  out.setFromAxisAngle(_Z, lean).multiply(_q2).multiply(_q1);
+  return out;
+}
+const SWORD_UP = 1.25;
 const _aimWorld = new THREE.Vector3();
 
 function distPointSeg(p, a, b) {
@@ -195,7 +214,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       hand.add(weapon);
       if (usesSword()) {
         weapon.position.set(0, 0.02, -0.02);
-        weapon.rotation.set(-0.55, 0, 0);
+        swordPose(weapon.quaternion, SWORD_UP, 0);
         if (left && left !== hand) {
           shield.visible = true;
           left.add(shield);
@@ -211,8 +230,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       camera.add(weapon);
       if (usesSword()) {
         weapon.scale.setScalar(1);
-        weapon.position.set(0.24, -0.22, -0.42);
-        weapon.rotation.set(-0.55, -0.25, -0.45);
+        weapon.position.set(0.2, -0.3, -0.5);
+        swordPose(weapon.quaternion, SWORD_UP, 0.18);
       } else {
         weapon.scale.setScalar(0.55);
         weapon.position.set(0.18, -0.14, -0.42);
@@ -435,14 +454,17 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (!weapon.parent) return;
 
     if (usesSword() && scripted) {
+      // A diagonal chop from the upright guard: the tip drives forward and
+      // down across the view with the edge in front, then recovers.
+      let k = 0;
       if (swingU >= 0) {
-        swingU += dt / 0.18;
-        const k = Math.sin(Math.min(1, swingU) * Math.PI);
-        weapon.rotation.set(-0.55 - 0.25 * k, -0.9 + k * 2.0, -0.45);
+        swingU += dt / 0.42;
+        const u = Math.min(1, swingU);
+        k = u < 0.45 ? 1 - (1 - u / 0.45) ** 3 : 1 - ((u - 0.45) / 0.55) ** 2;
         if (swingU >= 1) swingU = -1;
-      } else {
-        weapon.rotation.set(-0.55, -0.25, -0.45);
       }
+      swordPose(weapon.quaternion, SWORD_UP - 1.75 * k, 0.18 + 0.65 * k);
+      weapon.position.set(0.2 - 0.16 * k, -0.3 + 0.06 * k, -0.5 - 0.08 * k);
     }
 
     if (gripMode === 'hand') poseFromHands(dt);
@@ -471,8 +493,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     let speed = 0;
     const hand = hooks.rightHand?.() || hooks.leftHand?.();
-    if (gripMode === 'hand') {
-      // Fling it like a real blade: what matters is how fast the tip moves.
+    if (gripMode !== 'screen') {
+      // Fling it like a real blade: what matters is how fast the tip moves,
+      // so a wrist flick counts as much as a big arm swing.
       sword.localToWorld(_tipW.copy(_swordTip));
       if (haveTipPrev) speed = (_tipW.distanceTo(_prevTipW) / Math.max(dt, 0.001)) * 0.7;
       _prevTipW.copy(_tipW);
@@ -483,8 +506,25 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       handPrev.copy(handNow);
       haveHandPrev = true;
     }
-    if (usesSword() && (speed > 1.85 || (swingU >= 0 && swingU < 1))) hot = 0.12;
+    // In XR a swing only cuts when the edge leads: the blade tip has to move
+    // along the edge direction, not flat-first.
+    let edgeLead = 1;
+    if (usesSword() && !scripted) {
+      _vel.subVectors(_tip, _prevTip);
+      const len = _vel.length();
+      if (len > 1e-5) {
+        sword.getWorldQuaternion(_q1);
+        group.getWorldQuaternion(_q2).invert();
+        _edge.set(1, 0, 0).applyQuaternion(_q1).applyQuaternion(_q2);
+        edgeLead = Math.abs(_vel.dot(_edge)) / len;
+      } else {
+        edgeLead = 0;
+      }
+    }
+    const scriptedCut = swingU >= 0 && swingU < 0.5;
+    if (usesSword() && ((speed > 1.85 && edgeLead > 0.55) || scriptedCut)) hot = 0.12;
     else hot = Math.max(0, hot - dt);
+    if (sword.userData.edgeMat) sword.userData.edgeMat.emissiveIntensity = hot > 0 ? 3 : 0.5;
 
     if (input.slash && usesSword() && swingU < 0) {
       swingU = 0;
@@ -718,10 +758,24 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         }
         if (hot > 0 && usesSword()) {
           const chest = _local.set(e.mesh.position.x, 1.25, e.mesh.position.z);
-          const d0 = distPointSeg(chest, _base, _tip);
-          const d1 = distPointSeg(chest, _prevBase, _prevTip);
-          const blade = (d0 < 0.75 || d1 < 0.75) && _player.distanceTo(chest) < TUNING.swordRange;
-          if (blade || inFront(chest, 2.15, 0.2)) killEnemy(e, chest);
+          if (scripted) {
+            // Flat screen: the mouse cannot place the blade, so any swordsman
+            // close in front is cut.
+            const d0 = distPointSeg(chest, _base, _tip);
+            const d1 = distPointSeg(chest, _prevBase, _prevTip);
+            const blade = (d0 < 0.75 || d1 < 0.75) && _player.distanceTo(chest) < TUNING.swordRange;
+            if (blade || inFront(chest, 2.15, 0.2)) killEnemy(e, chest);
+          } else {
+            // XR: the edge has to pass through the body, between hips and head.
+            for (const y of [0.85, 1.2, 1.55]) {
+              _body.set(e.mesh.position.x, y, e.mesh.position.z);
+              const d = Math.min(distPointSeg(_body, _base, _tip), distPointSeg(_body, _prevBase, _prevTip));
+              if (d < 0.5) {
+                killEnemy(e, _body.clone());
+                break;
+              }
+            }
+          }
         }
       } else {
         group.localToWorld(_aimWorld.copy(_chest));
@@ -791,7 +845,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         const d0 = distPointSeg(arrow.mesh.position, _base, _tip);
         const d1 = distPointSeg(arrow.mesh.position, _prevBase, _prevTip);
         const close = arrow.mesh.position.distanceTo(_chest) < 1.5;
-        if (d0 < 0.7 || d1 < 0.7 || (close && inFront(arrow.mesh.position, 1.6, 0.05))) {
+        if (d0 < 0.7 || d1 < 0.7 || (scripted && close && inFront(arrow.mesh.position, 1.6, 0.05))) {
           reflectArrow(arrow, arrow.owner);
         }
       }

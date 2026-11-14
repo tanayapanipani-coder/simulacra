@@ -768,7 +768,10 @@ function restart() {
   hideGameOver();
   turnShown = null;
   lastMove = '';
+  // Tells the board to turn every piece back to face the other side.
+  game.reset = true;
   tabletop.refresh(game);
+  game.reset = false;
   updateHUD();
   playSfx('start');
   toast('The court is set.');

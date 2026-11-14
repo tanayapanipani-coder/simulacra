@@ -279,6 +279,9 @@ export function createTabletop(scene, sfx = {}) {
             const dz = dest.z - mesh.position.z;
             if (dx * dx + dz * dz > 0.0001) mesh.rotation.y = Math.atan2(dx, dz);
           }
+          // On a new game every piece walks home, then turns to face the
+          // other side.
+          if (state.reset) mesh.userData.faceHome = true;
         }
       }
     }
@@ -440,6 +443,16 @@ export function createTabletop(scene, sfx = {}) {
         mesh.position.x = base.x;
         mesh.position.z = base.z;
         mesh.position.y = base.y + Math.sin(clock.t * 2.2 + data.seed) * 0.0016;
+      }
+      if (data.faceHome && !data.tween && !data.fall && !data.held && !data.slay) {
+        const home = data.side === GOLD ? Math.PI : 0;
+        const delta = Math.atan2(Math.sin(home - mesh.rotation.y), Math.cos(home - mesh.rotation.y));
+        if (Math.abs(delta) < 0.01) {
+          mesh.rotation.y = home;
+          data.faceHome = false;
+        } else {
+          mesh.rotation.y += delta * (1 - Math.exp(-9 * dt));
+        }
       }
       if (data.pop) {
         data.pop = Math.max(0, data.pop - dt * 1.8);
