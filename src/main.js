@@ -168,6 +168,7 @@ let mouseMag = 0;
 let dragSpeed = 0;
 
 const controllers = [];
+const grips = [];
 const POINTER_DROP = THREE.MathUtils.degToRad(-20);
 const _aimOrigin = new THREE.Vector3();
 const _aimDir = new THREE.Vector3();
@@ -221,6 +222,12 @@ for (let i = 0; i < 2; i++) {
   });
   scene.add(controller);
   controllers.push(controller);
+  // The grip pose runs along the controller's handle, where a hilt would
+  // sit in the fist: the sword is mounted here so the blade continues
+  // straight out of the controller.
+  const grip = renderer.xr.getControllerGrip(i);
+  scene.add(grip);
+  grips.push(grip);
 }
 
 const hands = [];
@@ -262,6 +269,7 @@ const combat = createCombat({
     haptic,
     rightHand: () => findHand('right'),
     leftHand: () => findHand('left'),
+    rightGrip: () => grips[controllers.indexOf(findHand('right'))] || null,
     trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
 });

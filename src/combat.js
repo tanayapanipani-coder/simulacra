@@ -211,10 +211,14 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     const left = hooks.leftHand?.();
     if (renderer.xr.isPresenting && (right || left)) {
       const hand = right || left;
-      hand.add(weapon);
       if (usesSword()) {
-        weapon.position.set(0, 0.02, -0.02);
-        swordPose(weapon.quaternion, SWORD_UP, 0);
+        // The controller is the hilt: the blade runs straight along its
+        // handle (grip space -Z), upright when you hold it upright, with an
+        // edge turned toward your knuckles so a natural chop leads with it.
+        const grip = hooks.rightGrip?.() || hand;
+        grip.add(weapon);
+        weapon.position.set(0, 0, 0.03);
+        weapon.quaternion.setFromAxisAngle(_Z, Math.PI / 2);
         if (left && left !== hand) {
           shield.visible = true;
           left.add(shield);
@@ -222,6 +226,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
           shield.rotation.set(0.2, 0, 0);
         }
       } else {
+        hand.add(weapon);
         weapon.position.set(0.02, 0.04, -0.12);
         weapon.rotation.set(0, 0, 0);
       }
@@ -454,17 +459,29 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (!weapon.parent) return;
 
     if (usesSword() && scripted) {
-      // A diagonal chop from the upright guard: the tip drives forward and
-      // down across the view with the edge in front, then recovers.
-      let k = 0;
+      // Swung like a real sword, pivoting at the hand: wind up back over the
+      // right shoulder, cut diagonally down through the centre with the edge
+      // leading, follow through low on the left, then recover to the guard.
+      // Each key: [pitch (blade from forward up toward vertical and back),
+      // lean (tip toward centre), hand x, hand y].
+      const GUARD = [SWORD_UP, 0.18, 0.2, -0.3];
+      const WIND = [2.3, -0.35, 0.28, -0.16];
+      // With the blade pointing down, a negative lean puts the tip to the left.
+      const FOLLOW = [-0.75, -0.6, -0.06, -0.36];
+      let a = GUARD;
+      let b = GUARD;
+      let t = 0;
       if (swingU >= 0) {
-        swingU += dt / 0.42;
+        swingU += dt / 0.55;
         const u = Math.min(1, swingU);
-        k = u < 0.45 ? 1 - (1 - u / 0.45) ** 3 : 1 - ((u - 0.45) / 0.55) ** 2;
+        if (u < 0.22) { a = GUARD; b = WIND; t = u / 0.22; t = t * (2 - t); }
+        else if (u < 0.5) { a = WIND; b = FOLLOW; t = (u - 0.22) / 0.28; t = t * t * (3 - 2 * t); }
+        else { a = FOLLOW; b = GUARD; t = (u - 0.5) / 0.5; t = t * t * (3 - 2 * t); }
         if (swingU >= 1) swingU = -1;
       }
-      swordPose(weapon.quaternion, SWORD_UP - 1.75 * k, 0.18 + 0.65 * k);
-      weapon.position.set(0.2 - 0.16 * k, -0.3 + 0.06 * k, -0.5 - 0.08 * k);
+      const mix = (i) => a[i] + (b[i] - a[i]) * t;
+      swordPose(weapon.quaternion, mix(0), mix(1));
+      weapon.position.set(mix(2), mix(3), -0.5);
     }
 
     if (gripMode === 'hand') poseFromHands(dt);
@@ -521,15 +538,17 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         edgeLead = 0;
       }
     }
-    const scriptedCut = swingU >= 0 && swingU < 0.5;
+    // On screen the cut is live while the blade travels from wind-up to
+    // follow-through.
+    const scriptedCut = swingU >= 0.22 && swingU < 0.5;
     if (usesSword() && ((speed > 1.85 && edgeLead > 0.55) || scriptedCut)) hot = 0.12;
     else hot = Math.max(0, hot - dt);
     if (sword.userData.edgeMat) sword.userData.edgeMat.emissiveIntensity = hot > 0 ? 3 : 0.5;
 
     if (input.slash && usesSword() && swingU < 0) {
+      // Start the wind-up; the cut goes live on the downstroke.
       swingU = 0;
-      hot = 0.16;
-      playWhoosh();
+      setTimeout(() => { if (active) playWhoosh(); }, 110);
     }
   }
 
