@@ -518,6 +518,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         group.worldToLocal(origin);
         const lookObj = renderer.xr.isPresenting ? (bow.parent || camera) : camera;
         lookObj.getWorldDirection(_aim);
+        // getWorldDirection is +Z for anything but a camera; a controller points down -Z.
+        if (!lookObj.isCamera) _aim.negate();
         group.getWorldQuaternion(_invQ);
         _aim.applyQuaternion(_invQ.invert());
         _aim.y = 0;
