@@ -270,6 +270,7 @@ const combat = createCombat({
     rightHand: () => findHand('right'),
     leftHand: () => findHand('left'),
     rightGrip: () => grips[controllers.indexOf(findHand('right'))] || null,
+    lock: (on) => crosshair.classList.toggle('locked', on),
     trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
 });

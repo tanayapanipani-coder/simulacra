@@ -74,6 +74,14 @@ function swordPose(out, pitch, lean, spin = Math.PI / 2) {
   return out;
 }
 const SWORD_UP = 1.25;
+const _lockOrigin = new THREE.Vector3();
+const _lockDir = new THREE.Vector3();
+const _lockTo = new THREE.Vector3();
+const _aimPoint = new THREE.Vector3();
+const _bowAimL = new THREE.Vector3();
+const _negZ = new THREE.Vector3(0, 0, -1);
+const _home = new THREE.Vector3();
+const LOCK_Y = 1.15;
 const _aimWorld = new THREE.Vector3();
 
 function distPointSeg(p, a, b) {
@@ -106,6 +114,17 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   shield.visible = false;
 
   const sparks = createSparks(group);
+
+  // Lock-on marker: a ring that hangs on the enemy the bow is aimed at.
+  const lockRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.42, 0.025, 6, 32),
+    new THREE.MeshBasicMaterial({ color: 0xff4a3a, transparent: true, opacity: 0.9, depthTest: false }),
+  );
+  lockRing.renderOrder = 10;
+  lockRing.visible = false;
+  group.add(lockRing);
+  let locked = null;
+  let autoDraw = false;
   const enemies = [];
   const arrows = [];
   let active = false;
@@ -239,8 +258,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         swordPose(weapon.quaternion, SWORD_UP, 0.18);
       } else {
         weapon.scale.setScalar(0.55);
-        weapon.position.set(0.18, -0.14, -0.42);
-        weapon.rotation.set(0.12, -0.55, 0.04);
+        weapon.position.set(0.1, -0.13, -0.45);
+        weapon.rotation.set(0, 0, 0);
       }
       scripted = true;
     }
@@ -437,6 +456,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   }
 
   function teardown() {
+    setLock(null);
+    autoDraw = false;
     detachWeapons();
     clearActors();
     group.visible = false;
@@ -493,8 +514,21 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       }
       setBowString(bow, _nockL);
       if (nock) nock.visible = reload <= 0;
-      if (!renderer.xr.isPresenting) {
-        weapon.position.set(0.18, -0.14, -0.42);
+      if (gripMode === 'screen') {
+        // Point the bow down the crosshair: at the locked enemy, or at a
+        // point far along the view.
+        weapon.position.set(0.1, -0.13, -0.45);
+        if (locked?.alive) {
+          _aimPoint.set(locked.mesh.position.x, LOCK_Y, locked.mesh.position.z);
+          group.localToWorld(_aimPoint);
+        } else {
+          camera.getWorldPosition(_aimPoint);
+          camera.getWorldDirection(_bowAimL);
+          _aimPoint.addScaledVector(_bowAimL, 25);
+        }
+        camera.worldToLocal(_aimPoint);
+        _bowAimL.subVectors(_aimPoint, weapon.position).normalize();
+        weapon.quaternion.setFromUnitVectors(_negZ, _bowAimL);
       }
     }
 
@@ -550,6 +584,76 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       swingU = 0;
       setTimeout(() => { if (active) playWhoosh(); }, 110);
     }
+  }
+
+  function setLock(e) {
+    if (locked === e) return;
+    locked = e;
+    lockRing.visible = !!e;
+    hooks.lock?.(!!e);
+  }
+
+  // Where the bow is aimed, in arena space: the crosshair on a flat screen,
+  // the controller's pointing ray, or the bow's own line with hand tracking.
+  function bowAimRay(origin, dir) {
+    if (gripMode === 'screen') {
+      camera.getWorldPosition(origin);
+      camera.getWorldDirection(dir);
+    } else if (gripMode === 'hand') {
+      bow.getWorldPosition(origin);
+      dir.copy(_negZ).applyQuaternion(bow.getWorldQuaternion(_q1));
+    } else {
+      const ctrl = bow.parent || camera;
+      ctrl.getWorldPosition(origin);
+      dir.copy(_negZ).applyQuaternion(ctrl.getWorldQuaternion(_q1));
+    }
+    group.worldToLocal(origin);
+    group.getWorldQuaternion(_q2).invert();
+    dir.applyQuaternion(_q2).normalize();
+  }
+
+  // Lock onto the living enemy closest to the aim line (within a few
+  // degrees), sticking with the current one until the aim drifts off it.
+  function updateLock(dt) {
+    if (usesSword() || phase !== 'fight') {
+      setLock(null);
+      return;
+    }
+    bowAimRay(_lockOrigin, _lockDir);
+    let best = null;
+    let bestAng = gripMode === 'screen' ? 0.175 : 0.12;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      _lockTo.set(e.mesh.position.x, LOCK_Y, e.mesh.position.z).sub(_lockOrigin);
+      let ang = _lockDir.angleTo(_lockTo);
+      if (e === locked) ang -= 0.06;
+      if (ang < bestAng) {
+        bestAng = ang;
+        best = e;
+      }
+    }
+    setLock(best);
+    if (locked) {
+      lockRing.position.set(locked.mesh.position.x, LOCK_Y, locked.mesh.position.z);
+      lockRing.lookAt(_lockOrigin.x, _lockOrigin.y, _lockOrigin.z);
+      const pulse = 1 + Math.sin(phaseT * 9) * 0.08;
+      lockRing.scale.setScalar(pulse);
+    }
+  }
+
+  // Direction for a shot from `origin` (arena space): onto the locked enemy
+  // if there is one, otherwise along `fallback`.
+  function shotDir(origin, fallback, out) {
+    if (locked?.alive) return out.set(locked.mesh.position.x, LOCK_Y, locked.mesh.position.z).sub(origin).normalize();
+    return out.copy(fallback).normalize();
+  }
+
+  function fireArrow(origin, dir) {
+    const arrow = launchArrow(origin, dir, TUNING.playerArrowSpeed * (0.75 + draw * 0.35), { fromPlayer: true });
+    if (locked?.alive) arrow.target = locked;
+    playArrow();
+    draw = 0;
+    reload = 0.32;
   }
 
   // Hand-tracking: put the weapon in the fist, and let the right hand pinch
@@ -623,9 +727,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         _aim.normalize();
         const origin = _shotOrigin.copy(_gripW);
         group.worldToLocal(origin);
-        launchArrow(origin, _aim, TUNING.playerArrowSpeed * (0.75 + draw * 0.35), { fromPlayer: true });
-        playArrow();
-        reload = 0.32;
+        fireArrow(origin, shotDir(origin, _aim, _aim));
       }
       draw = 0;
       _nockL.set(0, 0, bow.userData.restZ);
@@ -701,29 +803,44 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (wantedGripMode() !== gripMode) attachWeapons();
     updateWeaponPose(dt, input);
 
+    updateLock(dt);
+
     if (!usesSword() && gripMode !== 'hand') {
-      if (input.primaryDown) draw = Math.min(1, draw + dt / 0.5);
-      if (input.primaryReleased && draw > 0.32 && reload <= 0) {
+      const loose = () => {
         const nock = bow.userData.nock;
         const origin = _shotOrigin;
         if (nock) nock.getWorldPosition(origin);
         else bow.getWorldPosition(origin);
         group.worldToLocal(origin);
-        const lookObj = renderer.xr.isPresenting ? (bow.parent || camera) : camera;
-        lookObj.getWorldDirection(_aim);
-        // getWorldDirection is +Z for anything but a camera; a controller points down -Z.
-        if (!lookObj.isCamera) _aim.negate();
-        group.getWorldQuaternion(_invQ);
-        _aim.applyQuaternion(_invQ.invert());
-        _aim.y = 0;
-        if (_aim.lengthSq() < 1e-6) _aim.set(0, 0, -1);
-        _aim.normalize();
-        launchArrow(origin, _aim, TUNING.playerArrowSpeed * (0.75 + draw * 0.35), { fromPlayer: true });
-        playArrow();
-        draw = 0;
-        reload = 0.32;
-      } else if (!input.primaryDown) {
-        draw = Math.max(0, draw - dt * 3);
+        if (gripMode === 'screen') {
+          // Toward whatever sits under the crosshair, far down the view.
+          camera.getWorldPosition(_aimPoint);
+          camera.getWorldDirection(_aim);
+          _aimPoint.addScaledVector(_aim, 25);
+          group.worldToLocal(_aimPoint);
+          _aim.subVectors(_aimPoint, origin);
+        } else {
+          bowAimRay(_lockOrigin, _aim);
+          _aim.y = 0;
+          if (_aim.lengthSq() < 1e-6) _aim.set(0, 0, -1);
+        }
+        fireArrow(origin, shotDir(origin, _aim.normalize(), _aim));
+        autoDraw = false;
+      };
+      if (gripMode === 'screen') {
+        // A click draws the bow and looses it on its own, onto the locked
+        // enemy (or straight down the crosshair).
+        if (input.primaryPressed && reload <= 0 && !autoDraw) autoDraw = true;
+        if (autoDraw) {
+          draw = Math.min(1, draw + dt / 0.3);
+          if (draw >= 1) loose();
+        } else {
+          draw = Math.max(0, draw - dt * 3);
+        }
+      } else {
+        if (input.primaryDown) draw = Math.min(1, draw + dt / 0.5);
+        if (input.primaryReleased && draw > 0.32 && reload <= 0) loose();
+        else if (!input.primaryDown) draw = Math.max(0, draw - dt * 3);
       }
     }
     if (!usesSword()) reload = Math.max(0, reload - dt);
@@ -826,6 +943,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         continue;
       }
       arrow.age += dt;
+      if (arrow.fromPlayer && arrow.target?.alive) {
+        // Curve gently onto the locked enemy.
+        _home.set(arrow.target.mesh.position.x, LOCK_Y, arrow.target.mesh.position.z).sub(arrow.mesh.position);
+        const speed = arrow.vel.length();
+        _home.normalize().multiplyScalar(speed);
+        arrow.vel.lerp(_home, 1 - Math.exp(-10 * dt)).setLength(speed);
+      }
       arrow.mesh.position.addScaledVector(arrow.vel, dt);
       _dir.copy(arrow.vel).normalize();
       arrow.mesh.quaternion.setFromUnitVectors(_forward, _dir);
