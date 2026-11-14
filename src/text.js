@@ -23,12 +23,13 @@ export function paintText(text, {
   g.fillStyle = color;
   g.font = font;
   if (sub) {
-    g.fillText(text, width / 2, height * 0.38);
+    g.fillText(text, width / 2, height * 0.38, width * 0.94);
     g.font = '500 48px Outfit, Segoe UI, sans-serif';
     g.fillStyle = subColor;
     g.fillText(sub, width / 2, height * 0.72);
   } else {
-    g.fillText(text, width / 2, height / 2);
+    // Squeeze long labels to fit rather than clipping them.
+    g.fillText(text, width / 2, height / 2, width * 0.94);
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;

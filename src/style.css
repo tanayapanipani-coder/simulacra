@@ -182,7 +182,8 @@ button.primary, #btn-play, #btn-again {
 }
 
 #toast {
-  bottom: 28%;
+  /* Just under the turn bar, clear of the board. */
+  top: calc(max(16px, env(safe-area-inset-top)) + 7.4rem);
   margin: 0;
   padding: 0.55rem 0.9rem;
   background: rgba(16, 12, 10, 0.78);
@@ -310,3 +311,37 @@ code {
   .clash { grid-template-columns: 1fr; }
   #title { padding: 1rem; }
 }
+
+/* Whose move: a coloured pill at the top that flashes on every change. */
+#topbar.gold #turn, #topbar.violet #turn {
+  display: inline-block;
+  padding: 0.25rem 1rem;
+  border-radius: 999px;
+  color: #17120c;
+  text-shadow: none;
+}
+#topbar.gold #turn { background: var(--gold); box-shadow: 0 0 22px rgba(230, 194, 122, 0.55); }
+#topbar.violet #turn { background: var(--violet); box-shadow: 0 0 22px rgba(201, 182, 255, 0.55); }
+
+#last-move {
+  margin: 0.35rem 0 0.1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #f3ead7;
+  text-shadow: 0 1px 8px #000;
+}
+#last-move.hidden { display: none; }
+
+/* The pill pops each time the move passes to the other side. */
+@keyframes turn-flash {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18); filter: brightness(1.35); }
+  100% { transform: scale(1); }
+}
+#topbar.flash #turn { animation: turn-flash 0.6s cubic-bezier(0.2, 1.4, 0.4, 1); }
+
+/* The winner's colour runs through the game-over card. */
+#gameover.gold .card { border-color: var(--gold); box-shadow: 0 0 60px rgba(230, 194, 122, 0.45); }
+#gameover.violet .card { border-color: var(--violet); box-shadow: 0 0 60px rgba(201, 182, 255, 0.45); }
+#gameover.gold h2 { color: var(--gold); }
+#gameover.violet h2 { color: var(--violet); }

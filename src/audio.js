@@ -176,3 +176,116 @@ export function toggleMute() {
 export function isMuted() {
   return muted;
 }
+
+// ---------------------------------------------------------------------------
+// Board sound events, organised the way chess.com links sounds to moves: each
+// board event has its own sound, and it plays in sync with the piece's
+// animation rather than when the click happens.
+//   swipe     the piece starts sliding to its new square
+//   place     the piece lands (a quiet move)
+//   ping      the piece lands on a square it has taken (a takeover)
+//   turn      the move passes to the other side
+//   illegal   you tried something that is not allowed
+//   start     a new game is set up
+//   victory   a monarch has fallen
+// All sounds are synthesised here; no audio files are loaded.
+
+function bandNoise(type, from, to, dur, gain, q = 0.7) {
+  if (muted) return;
+  const { c, src } = noise();
+  const now = c.currentTime;
+  const f = c.createBiquadFilter();
+  f.type = type;
+  f.frequency.setValueAtTime(from, now);
+  f.frequency.exponentialRampToValueAtTime(to, now + dur);
+  f.Q.value = q;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(gain, now + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+  src.connect(f);
+  f.connect(g);
+  g.connect(c.destination);
+  src.start(now);
+  src.stop(now + dur + 0.02);
+}
+
+function bell(freq, dur, gain, delay = 0) {
+  if (muted) return;
+  const c = ac();
+  const now = c.currentTime + delay;
+  // A struck bell: a fundamental plus inharmonic partials that die faster.
+  for (const [mult, amp, decay] of [[1, 1, 1], [2.76, 0.42, 0.55], [5.4, 0.2, 0.3]]) {
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = freq * mult;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(gain * amp, now + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur * decay);
+    o.connect(g);
+    g.connect(c.destination);
+    o.start(now);
+    o.stop(now + dur + 0.05);
+  }
+}
+
+function knock(freq, gain) {
+  if (muted) return;
+  // Wooden piece set down on a board: a short pitched thump plus a click.
+  playTone(freq, 0.07, 'sine', gain, freq * 0.55);
+  bandNoise('bandpass', 2600, 1200, 0.03, gain * 0.9, 1.4);
+}
+
+export function playSwipe() {
+  bandNoise('bandpass', 700, 2600, 0.2, 0.07, 0.9);
+}
+
+export function playPlace() {
+  knock(190, 0.16);
+}
+
+export function playPing() {
+  knock(170, 0.12);
+  bell(1318.5, 0.75, 0.07, 0.015);
+}
+
+export function playTurn(side) {
+  // Gold and Violet each get their own soft two-note cue.
+  const [a, b] = side === 0 ? [659.3, 880] : [587.3, 784];
+  bell(a, 0.35, 0.025);
+  bell(b, 0.4, 0.022, 0.09);
+}
+
+export function playIllegal() {
+  playTone(150, 0.12, 'square', 0.03, 110);
+}
+
+export function playStart() {
+  bell(523.3, 0.4, 0.03);
+  bell(784, 0.5, 0.03, 0.12);
+}
+
+export function playVictory() {
+  // Rising fanfare that resolves on a held major chord.
+  const run = [523.3, 659.3, 784, 1046.5];
+  run.forEach((n, i) => setTimeout(() => playTone(n, 0.22, 'triangle', 0.05), i * 110));
+  setTimeout(() => {
+    for (const n of [523.3, 659.3, 784, 1046.5]) playTone(n, 1.1, 'triangle', 0.035);
+    bell(1046.5, 1.4, 0.05);
+  }, run.length * 110 + 40);
+}
+
+const SFX = {
+  swipe: playSwipe,
+  place: playPlace,
+  ping: playPing,
+  turn: playTurn,
+  illegal: playIllegal,
+  start: playStart,
+  victory: playVictory,
+};
+
+export function playSfx(event, arg) {
+  SFX[event]?.(arg);
+}

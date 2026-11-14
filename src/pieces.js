@@ -143,15 +143,49 @@ export function createBattleBow(hex = 0xf0d090) {
   );
   const limb = add(group, new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.014, 6, false), wood));
   const wrap = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), accent));
-  const string = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 1.05, 4), accent));
-  string.position.set(0, 0, 0.08);
+  // The string is two segments from the limb tips to the nock point, so it
+  // bends to wherever it is drawn from (see setBowString).
+  const strGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 4);
+  const stringTop = add(group, new THREE.Mesh(strGeo, accent));
+  const stringBot = add(group, new THREE.Mesh(strGeo, accent));
   const nock = createArrowMesh(hex);
-  nock.position.set(0, 0, 0.08);
   group.add(nock);
-  group.userData.string = string;
+  group.userData.stringTop = stringTop;
+  group.userData.stringBot = stringBot;
+  group.userData.tipTop = new THREE.Vector3(0, 0.58, 0.08);
+  group.userData.tipBot = new THREE.Vector3(0, -0.58, 0.08);
+  group.userData.grip = new THREE.Vector3(0, 0, -0.02);
   group.userData.nock = nock;
   group.userData.restZ = 0.08;
+  setBowString(group, new THREE.Vector3(0, 0, 0.08));
   return group;
+}
+
+const _segDir = new THREE.Vector3();
+const _segUp = new THREE.Vector3(0, 1, 0);
+function segment(mesh, a, b) {
+  _segDir.subVectors(b, a);
+  const len = Math.max(1e-4, _segDir.length());
+  mesh.position.addVectors(a, b).multiplyScalar(0.5);
+  mesh.scale.set(1, len, 1);
+  mesh.quaternion.setFromUnitVectors(_segUp, _segDir.divideScalar(len));
+}
+
+const _arrowAxis = new THREE.Vector3(0, 0, -1);
+const _arrowDir = new THREE.Vector3();
+/**
+ * Pull the bow string to `nockLocal` (bow space) and lay the nocked arrow from
+ * there through the grip. Arrow meshes point down -Z with the nock at +0.34.
+ */
+export function setBowString(bow, nockLocal) {
+  const d = bow.userData;
+  segment(d.stringTop, d.tipTop, nockLocal);
+  segment(d.stringBot, d.tipBot, nockLocal);
+  _arrowDir.subVectors(d.grip, nockLocal);
+  if (_arrowDir.lengthSq() < 1e-6) _arrowDir.set(0, 0, -1);
+  _arrowDir.normalize();
+  d.nock.quaternion.setFromUnitVectors(_arrowAxis, _arrowDir);
+  d.nock.position.copy(nockLocal).addScaledVector(_arrowDir, 0.34);
 }
 
 export function createArrowMesh(hex = 0xe8d2a0) {

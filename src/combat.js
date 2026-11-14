@@ -6,8 +6,10 @@ import {
   createBattleShield,
   createBattleSword,
   createSoldier,
+  setBowString,
 } from './pieces.js';
 import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js';
+import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -44,6 +46,15 @@ const _swordTip = new THREE.Vector3(0, 0, -0.9);
 const _swordBase = new THREE.Vector3(0, 0, -0.14);
 const _look = new THREE.Vector3();
 const _lookQ = new THREE.Quaternion();
+const _gripPos = new THREE.Vector3();
+const _gripQuat = new THREE.Quaternion();
+const _pinchPt = new THREE.Vector3();
+const _nockW = new THREE.Vector3();
+const _nockL = new THREE.Vector3();
+const _tipW = new THREE.Vector3();
+const _prevTipW = new THREE.Vector3();
+const _gripW = new THREE.Vector3();
+const _wristL = new THREE.Vector3();
 const _aimWorld = new THREE.Vector3();
 
 function distPointSeg(p, a, b) {
@@ -102,6 +113,26 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   let haveHandPrev = false;
   let scripted = false;
   let presented = false;
+  // 'screen' (no XR), 'controller' (weapons on controllers) or 'hand'
+  // (weapons posed from tracked hand joints every frame).
+  let gripMode = 'screen';
+  let stringHeld = false;
+  let pinching = false;
+  let haveTipPrev = false;
+
+  function trackedHand(which) {
+    if (!renderer.xr.isPresenting) return null;
+    const hand = hooks.trackedHand?.(which);
+    return isTracked(hand) ? hand : null;
+  }
+
+  function wantedGripMode() {
+    if (!renderer.xr.isPresenting) return 'screen';
+    // The sword needs its hand; the bow needs the bow hand (left), and the
+    // string is drawn by pinching with the right.
+    if (usesSword() ? trackedHand('right') : trackedHand('left')) return 'hand';
+    return 'controller';
+  }
 
   function usesSword() {
     return mode === 'sword-melee' || mode === 'sword-deflect';
@@ -142,6 +173,21 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     detachWeapons();
     const weapon = usesSword() ? sword : bow;
     weapon.visible = true;
+    weapon.scale.setScalar(1);
+    gripMode = wantedGripMode();
+    stringHeld = false;
+    pinching = false;
+    haveTipPrev = false;
+    if (gripMode === 'hand') {
+      // Posed in world space from the hand joints each frame.
+      scene.add(weapon);
+      if (usesSword() && trackedHand('left')) {
+        shield.visible = true;
+        scene.add(shield);
+      }
+      scripted = false;
+      return;
+    }
     const right = hooks.rightHand?.();
     const left = hooks.leftHand?.();
     if (renderer.xr.isPresenting && (right || left)) {
@@ -399,15 +445,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       }
     }
 
+    if (gripMode === 'hand') poseFromHands(dt);
+
     if (!usesSword()) {
       const nock = bow.userData.nock;
-      const string = bow.userData.string;
-      const z = bow.userData.restZ + draw * 0.24;
-      if (string) string.position.z = z;
-      if (nock) {
-        nock.visible = reload <= 0;
-        nock.position.z = z;
+      if (!(gripMode === 'hand' && stringHeld)) {
+        _nockL.set(0, 0, bow.userData.restZ + draw * 0.24);
       }
+      setBowString(bow, _nockL);
+      if (nock) nock.visible = reload <= 0;
       if (!renderer.xr.isPresenting) {
         weapon.position.set(0.18, -0.14, -0.42);
       }
@@ -425,7 +471,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     let speed = 0;
     const hand = hooks.rightHand?.() || hooks.leftHand?.();
-    if (hand && renderer.xr.isPresenting) {
+    if (gripMode === 'hand') {
+      // Fling it like a real blade: what matters is how fast the tip moves.
+      sword.localToWorld(_tipW.copy(_swordTip));
+      if (haveTipPrev) speed = (_tipW.distanceTo(_prevTipW) / Math.max(dt, 0.001)) * 0.7;
+      _prevTipW.copy(_tipW);
+      haveTipPrev = true;
+    } else if (hand && renderer.xr.isPresenting) {
       hand.getWorldPosition(handNow);
       if (haveHandPrev) speed = handNow.distanceTo(handPrev) / Math.max(dt, 0.001);
       handPrev.copy(handNow);
@@ -439,6 +491,87 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       hot = 0.16;
       playWhoosh();
     }
+  }
+
+  // Hand-tracking: put the weapon in the fist, and let the right hand pinch
+  // the bow string, pull it back and let go to shoot.
+  function poseFromHands(dt) {
+    if (usesSword()) {
+      const right = trackedHand('right');
+      if (right && swordGrip(right, _gripPos, _gripQuat)) {
+        sword.position.copy(_gripPos);
+        sword.quaternion.copy(_gripQuat);
+        sword.visible = true;
+      } else {
+        sword.visible = false;
+        haveTipPrev = false;
+      }
+      const left = trackedHand('left');
+      if (shield.parent && left && wrist(left, _wristL)) {
+        // Strapped to the forearm, face toward where the hand points.
+        if (bowGrip(left, _gripPos, _gripQuat)) {
+          shield.position.copy(_wristL).lerp(_gripPos, 0.4);
+          shield.quaternion.copy(_gripQuat);
+          shield.visible = true;
+        }
+      } else if (shield.parent) {
+        shield.visible = false;
+      }
+      return;
+    }
+
+    const left = trackedHand('left');
+    if (!left || !bowGrip(left, _gripPos, _gripQuat)) {
+      bow.visible = false;
+      stringHeld = false;
+      return;
+    }
+    bow.visible = true;
+    bow.position.copy(_gripPos);
+    bow.quaternion.copy(_gripQuat);
+    bow.updateMatrixWorld(true);
+
+    const right = trackedHand('right');
+    const gap = right ? pinch(right, _pinchPt) : null;
+    const was = pinching;
+    pinching = gap != null && (was ? gap < 0.035 : gap < 0.02);
+
+    // Rest point of the string, in world space.
+    bow.localToWorld(_nockW.set(0, 0, bow.userData.restZ));
+
+    if (pinching && !was && reload <= 0 && _pinchPt.distanceTo(_nockW) < 0.1) {
+      stringHeld = true;
+      hooks.haptic?.(0.2);
+    }
+    if (stringHeld && pinching) {
+      bow.worldToLocal(_nockL.copy(_pinchPt));
+      // The string only travels backward; keep it near the bow's centre line.
+      _nockL.x = THREE.MathUtils.clamp(_nockL.x, -0.06, 0.06);
+      _nockL.y = THREE.MathUtils.clamp(_nockL.y, -0.08, 0.08);
+      _nockL.z = Math.max(bow.userData.restZ, _nockL.z);
+      draw = THREE.MathUtils.clamp((_nockL.z - bow.userData.restZ) / 0.55, 0, 1);
+    }
+    if (stringHeld && !pinching) {
+      stringHeld = false;
+      if (draw > 0.2 && reload <= 0) {
+        // Fly along the drawn arrow: from the nock through the grip.
+        bow.localToWorld(_nockW.copy(_nockL));
+        bow.localToWorld(_gripW.copy(bow.userData.grip));
+        _aim.subVectors(_gripW, _nockW);
+        group.getWorldQuaternion(_invQ);
+        _aim.applyQuaternion(_invQ.invert());
+        _aim.y = THREE.MathUtils.clamp(_aim.y, -0.35 * _aim.length(), 0.35 * _aim.length());
+        _aim.normalize();
+        const origin = _shotOrigin.copy(_gripW);
+        group.worldToLocal(origin);
+        launchArrow(origin, _aim, TUNING.playerArrowSpeed * (0.75 + draw * 0.35), { fromPlayer: true });
+        playArrow();
+        reload = 0.32;
+      }
+      draw = 0;
+      _nockL.set(0, 0, bow.userData.restZ);
+    }
+    if (!stringHeld) draw = Math.max(0, draw - dt * 3);
   }
 
   function refreshLook() {
@@ -506,9 +639,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     playerLocal();
     refreshLook();
     _chest.set(_player.x, _player.y - 0.35, _player.z);
+    if (wantedGripMode() !== gripMode) attachWeapons();
     updateWeaponPose(dt, input);
 
-    if (!usesSword()) {
+    if (!usesSword() && gripMode !== 'hand') {
       if (input.primaryDown) draw = Math.min(1, draw + dt / 0.5);
       if (input.primaryReleased && draw > 0.32 && reload <= 0) {
         const nock = bow.userData.nock;
@@ -532,8 +666,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       } else if (!input.primaryDown) {
         draw = Math.max(0, draw - dt * 3);
       }
-      reload = Math.max(0, reload - dt);
     }
+    if (!usesSword()) reload = Math.max(0, reload - dt);
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {

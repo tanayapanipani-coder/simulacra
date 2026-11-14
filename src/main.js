@@ -14,10 +14,8 @@ import { createTabletop, SQ, squareLocal } from './tabletop.js';
 import { createCombat, INLINE_ARENA } from './combat.js';
 import {
   isMuted,
-  playCapture,
   playDefeat,
-  playFanfare,
-  playMove,
+  playSfx,
   playTick,
   resumeAudio,
   setMusicTension,
@@ -37,6 +35,11 @@ const meter = $('meter');
 const meterBar = $('meter-bar');
 const toastEl = $('toast');
 const gameoverEl = $('gameover');
+const lastMoveEl = $('last-move');
+let turnShown = null;
+// What was just played, shown under the turn pill, and a running move count.
+let lastMove = '';
+let fallEpoch = -1;
 const goTitle = $('go-title');
 const goSub = $('go-sub');
 const placeHint = $('place-hint');
@@ -96,7 +99,14 @@ const rim = new THREE.DirectionalLight(0x9eb0ff, 0.35);
 rim.position.set(-0.8, 0.6, -0.5);
 scene.add(rim);
 
-const tabletop = createTabletop(scene);
+// Board sounds are driven by the pieces themselves: the swipe when a piece
+// starts sliding, a knock when it lands, a ping when it lands on a square it
+// has taken, and the victory fanfare when a monarch hits the board.
+const tabletop = createTabletop(scene, {
+  onSlide: () => playSfx('swipe'),
+  onLand: (_piece, kind) => playSfx(kind),
+  onFall: () => onMonarchFallen(),
+});
 const { board, diorama, room, pickables } = tabletop;
 
 const fadeMat = new THREE.MeshBasicMaterial({
@@ -229,6 +239,9 @@ for (let i = 0; i < 2; i++) {
   hand.addEventListener('connected', (event) => {
     hand.userData.inputSource = event.data;
   });
+  hand.addEventListener('disconnected', () => {
+    hand.userData.inputSource = null;
+  });
   const model = handFactory.createHandModel(hand, 'spheres');
   hand.add(model);
   scene.add(hand);
@@ -249,6 +262,7 @@ const combat = createCombat({
     haptic,
     rightHand: () => findHand('right'),
     leftHand: () => findHand('left'),
+    trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
 });
 
@@ -401,24 +415,47 @@ function updateHUD() {
   btnMove.classList.toggle('hidden', !(xrKind === 'ar' && !placing && !fighting));
   btnArMini.classList.toggle('hidden', xrKind === 'ar');
   btnVrMini.classList.toggle('hidden', xrKind === 'vr');
+  const falling = game.phase === 'over' && fallEpoch !== -1;
   turnEl.textContent = game.phase === 'over'
-    ? (game.draw ? 'Stalemate' : `${SIDE_NAME[game.winner]} wins`)
-    : `${SIDE_NAME[game.turn]}'s turn`;
-  turnEl.classList.toggle('gold', game.turn === 0);
-  turnEl.classList.toggle('violet', game.turn === 1);
+    ? (game.draw ? 'Stalemate' : falling ? 'The monarch falls…' : `${SIDE_NAME[game.winner]} wins!`)
+    : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]} to move`;
+  lastMoveEl.textContent = lastMove;
+  lastMoveEl.classList.toggle('hidden', !lastMove || menu);
+  const lead = game.phase === 'over' ? game.winner : game.turn;
+  turnEl.classList.toggle('gold', lead === 0);
+  turnEl.classList.toggle('violet', lead === 1);
+  topbar.classList.toggle('gold', lead === 0);
+  topbar.classList.toggle('violet', lead === 1);
+  const who = SIDE_NAME[game.turn];
   if (placing) hintEl.textContent = 'Point at a table, then tap to place the court.';
+  else if (game.phase === 'over') hintEl.textContent = game.draw ? 'Neither side can move.' : `${SIDE_NAME[game.winner]} has taken the monarch.`;
   else if (!game.selected) {
     hintEl.textContent = xrKind === 'ar'
-      ? 'Aim at your piece and tap.'
+      ? `${who}: aim at one of your pieces and tap.`
       : xrKind === 'vr'
-        ? 'Pinch a piece between thumb and finger, or point and pull the trigger.'
-        : 'Click one of your pieces.';
-  } else hintEl.textContent = 'Green moves. Red strikes. The monarch only steps.';
+        ? `${who}: pinch one of your pieces, or point and pull the trigger.`
+        : `${who}: click one of your pieces.`;
+  } else hintEl.textContent = `${who}: green moves, red strikes. The monarch only steps.`;
+  flashTurn();
   btnSound.textContent = isMuted() ? 'Sound off' : 'Sound on';
 }
 
+// The turn pill at the top flashes whenever the move passes to the other
+// side (or the game ends), so the change is never missed.
+function flashTurn() {
+  if (menu || game.phase === 'combat') return;
+  const key = `${game.phase}|${game.turn}|${game.moveNo || 1}|${fallEpoch !== -1}`;
+  if (key === turnShown) return;
+  turnShown = key;
+  topbar.classList.remove('flash');
+  void topbar.offsetWidth;
+  topbar.classList.add('flash');
+}
+
 function showGameOver() {
-  goTitle.textContent = game.draw ? 'The court is locked' : 'The monarch is captured';
+  gameoverEl.classList.toggle('gold', !game.draw && game.winner === 0);
+  gameoverEl.classList.toggle('violet', !game.draw && game.winner === 1);
+  goTitle.textContent = game.draw ? 'The court is locked' : `${SIDE_NAME[game.winner]} wins!`;
   goSub.textContent = game.draw
     ? 'Neither side can move.'
     : `${SIDE_NAME[game.winner]} takes the court.`;
@@ -437,32 +474,49 @@ function settle(info) {
   if (game.phase === 'over') showGameOver();
 }
 
+// Squares are named like chess: files a–e from Gold's left, ranks 1–5 from
+// Gold's side of the board.
+function squareName(r, c) {
+  return `${'abcde'[c]}${5 - r}`;
+}
+
+function describe(piece) {
+  return `${SIDE_NAME[piece.side]} ${TYPE_NAME[piece.type]}`;
+}
+
 function doMove(r, c) {
   const from = game.selected;
   const piece = game.board[from.r][from.c];
   game.board[r][c] = piece;
   game.board[from.r][from.c] = null;
-  playMove();
+  lastMove = `${describe(piece)} ${squareName(from.r, from.c)} → ${squareName(r, c)}`;
+  game.moveNo = (game.moveNo || 1) + 1;
   settle(advanceTurn(game));
 }
 
 function finishCombat(win) {
   const { from, to } = pending || {};
   const attacker = from && game.board[from.r][from.c];
+  const defender = to && game.board[to.r][to.c];
+  if (attacker) {
+    lastMove = win
+      ? `${describe(attacker)} takes ${defender ? describe(defender) : 'the square'} on ${squareName(to.r, to.c)}`
+      : `${describe(attacker)} falls attacking ${squareName(to.r, to.c)}`;
+    game.moveNo = (game.moveNo || 1) + 1;
+  }
   if (win && attacker) {
     game.board[to.r][to.c] = attacker;
     game.board[from.r][from.c] = null;
-    playCapture();
-    toast(`${SIDE_NAME[attacker.side]} ${TYPE_NAME[attacker.type]} takes the square`);
+    // The ping plays when the piece lands on the square it took.
+    game.takeover = attacker.id;
   } else if (attacker) {
-    const name = `${SIDE_NAME[attacker.side]} ${TYPE_NAME[attacker.type]}`;
     game.board[from.r][from.c] = null;
     playDefeat();
-    toast(`${name} falls`);
   }
   game.phase = 'play';
   pending = null;
   settle(advanceTurn(game));
+  game.takeover = null;
 }
 
 function doAttack(r, c) {
@@ -470,15 +524,18 @@ function doAttack(r, c) {
   const attacker = game.board[from.r][from.c];
   const defender = game.board[r][c];
   if (defender.type === 'X') {
-    game.board[r][c] = attacker;
-    game.board[from.r][from.c] = null;
+    // Any archer or swordsman striking the monarch ends the game: the monarch
+    // topples onto the board, then the winner is announced.
     game.selected = null;
     game.phase = 'over';
     game.winner = attacker.side;
     game.draw = false;
-    playFanfare();
+    game.fallen = { id: defender.id, by: { r: from.r, c: from.c } };
+    fallEpoch = epoch;
+    lastMove = `${describe(attacker)} strikes the ${SIDE_NAME[defender.side]} Monarch on ${squareName(r, c)}`;
+    playSfx('ping');
     tabletop.refresh(game);
-    showGameOver();
+    updateHUD();
     return;
   }
   const token = ++epoch;
@@ -495,6 +552,14 @@ function doAttack(r, c) {
     if (token !== epoch || result === 'abort') return;
     finishCombat(result === true);
   });
+}
+
+function onMonarchFallen() {
+  if (fallEpoch !== epoch || game.phase !== 'over') return;
+  fallEpoch = -1;
+  playSfx('victory');
+  updateHUD();
+  setTimeout(() => { if (game.phase === 'over') showGameOver(); }, 900);
 }
 
 function handlePick(data) {
@@ -521,6 +586,10 @@ function handlePick(data) {
     return;
   }
   if (!game.selected || data.r == null) {
+    if (data.id && data.side !== game.turn) {
+      playSfx('illegal');
+      toast(`It is ${SIDE_NAME[game.turn]}'s move.`);
+    }
     game.selected = null;
     tabletop.refresh(game);
     updateHUD();
@@ -529,6 +598,10 @@ function handlePick(data) {
   const opt = options(game, game.selected.r, game.selected.c);
   if (opt.moves.some((m) => m.r === data.r && m.c === data.c)) doMove(data.r, data.c);
   else if (opt.attacks.some((m) => m.r === data.r && m.c === data.c)) doAttack(data.r, data.c);
+  else {
+    playSfx('illegal');
+    toast(`It is ${SIDE_NAME[game.turn]}'s move — pick a green or red square.`);
+  }
 }
 
 function findData(object) {
@@ -693,8 +766,11 @@ function restart() {
   game = createGame();
   pending = null;
   hideGameOver();
+  turnShown = null;
+  lastMove = '';
   tabletop.refresh(game);
   updateHUD();
+  playSfx('start');
   toast('The court is set.');
 }
 
@@ -830,9 +906,11 @@ function squareUnder(x, z) {
 }
 
 function updateHands() {
-  const showHands = renderer.xr.isPresenting && !combatView;
+  // Hands stay visible in the duels too, so you can see them holding the
+  // sword or drawing the bow.
+  const showHands = renderer.xr.isPresenting;
   for (let i = 0; i < handModels.length; i++) handModels[i].visible = showHands;
-  if (!showHands || game.phase !== 'play' || menu || placing) {
+  if (!showHands || combatView || game.phase !== 'play' || menu || placing) {
     if (heldPiece) releaseHeld(false);
     return;
   }
@@ -1015,6 +1093,7 @@ async function detectXR() {
 if (false) {
   window.__crownfall = {
     get game() { return game; },
+    tabletop,
     refresh: () => tabletop.refresh(game),
     win: () => combat.force(true),
     lose: () => combat.force(false),

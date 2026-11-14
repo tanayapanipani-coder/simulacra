@@ -72,7 +72,17 @@ function makePanelMaterial(title, sub) {
   return new THREE.MeshBasicMaterial({ map: tex, transparent: true });
 }
 
-export function createTabletop(scene) {
+const SIDE_HEX = ['#f0d48a', '#c9b6ff'];
+const SIDE_GLOW = [0xffc94a, 0xa98bff];
+
+/**
+ * @param {THREE.Scene} scene
+ * @param {object} [sfx] board sound hooks, called in sync with the pieces:
+ *   onSlide(piece) when a piece starts moving, onLand(piece, kind) when it
+ *   arrives (kind is 'place' or 'ping' for a takeover), onFall(piece) when a
+ *   monarch hits the board.
+ */
+export function createTabletop(scene, sfx = {}) {
   const board = new THREE.Group();
   scene.add(board);
 
@@ -125,12 +135,28 @@ export function createTabletop(scene) {
   goldLabel.raycast = () => {};
   violetLabel.raycast = () => {};
   board.add(goldLabel, violetLabel);
+  const labelScale = [0.14, 0.035];
 
-  const turnSprite = makeTextSprite("Gold's turn", '#f0d48a', [0.22, 0.055]);
-  turnSprite.position.set(0, 0.08, TOP / 2 + 0.1);
-  turnSprite.visible = false;
+  // Whose move it is, floating over the board in that side's colour, plus a
+  // glowing bar along that side's edge. Both pulse when the turn changes.
+  const turnSprite = makeTextSprite("Gold's move", SIDE_HEX[0], [0.3, 0.075]);
+  // Beyond the far edge, clear of the board, so it never hides the pieces.
+  turnSprite.position.set(0, 0.1, -(TOP / 2 + 0.16));
   turnSprite.raycast = () => {};
   board.add(turnSprite);
+  const turnBars = [0, 1].map((side) => {
+    const bar = new THREE.Mesh(
+      new THREE.BoxGeometry(TOP + 0.05, 0.006, 0.02),
+      new THREE.MeshBasicMaterial({ color: SIDE_GLOW[side], transparent: true, opacity: 0.9 }),
+    );
+    bar.position.set(0, 0.037, side === 0 ? TOP / 2 + 0.02 : -(TOP / 2 + 0.02));
+    bar.raycast = () => {};
+    board.add(bar);
+    return bar;
+  });
+  let turnPulse = 0;
+  let shownTurn = null;
+  const sideLabels = [goldLabel, violetLabel];
 
   const endPanel = new THREE.Group();
   endPanel.position.set(0, 0.2, 0.02);
@@ -247,6 +273,8 @@ export function createTabletop(scene) {
               t: 0,
               dur: 0.42,
             };
+            mesh.userData.landKind = state.takeover === piece.id ? 'ping' : 'place';
+            sfx.onSlide?.(piece);
             const dx = dest.x - mesh.position.x;
             const dz = dest.z - mesh.position.z;
             if (dx * dx + dz * dz > 0.0001) mesh.rotation.y = Math.atan2(dx, dz);
@@ -257,6 +285,30 @@ export function createTabletop(scene) {
 
     for (const [id, mesh] of meshes) {
       if (!alive.has(id) && !mesh.userData.slay) mesh.userData.slay = 0.001;
+    }
+
+    // A new game stands any fallen monarch back up.
+    for (const [id, mesh] of meshes) {
+      if (mesh.userData.fall && state.fallen?.id !== id) {
+        mesh.quaternion.copy(mesh.userData.fall.q0);
+        mesh.userData.fall = null;
+      }
+    }
+
+    // A struck monarch topples away from whoever hit it, and stays down.
+    if (state.fallen && meshes.has(state.fallen.id)) {
+      const mesh = meshes.get(state.fallen.id);
+      if (!mesh.userData.fall) {
+        const from = squareLocal(state.fallen.by.r, state.fallen.by.c);
+        const away = new THREE.Vector3().subVectors(mesh.position, from).setY(0);
+        if (away.lengthSq() < 1e-8) away.set(0, 0, 1);
+        away.normalize();
+        // Rotating about (up x away) tips the top of the piece toward `away`.
+        const axisWorld = new THREE.Vector3(0, 1, 0).cross(away).normalize();
+        mesh.userData.fall = { t: 0, axis: axisWorld, base: mesh.position.clone(), q0: mesh.quaternion.clone(), landed: false };
+        const attackerMesh = [...meshes.values()].find((m) => m.userData.r === state.fallen.by.r && m.userData.c === state.fallen.by.c);
+        if (attackerMesh) attackerMesh.userData.pop = 1;
+      }
     }
 
     clearMarkers();
@@ -280,18 +332,37 @@ export function createTabletop(scene) {
       for (const m of opt.attacks) addMarker(m.r, m.c, 'attack');
     }
 
-    const turnColor = state.turn === GOLD ? '#f0d48a' : '#c9b6ff';
-    const turnText = state.phase === 'over'
-      ? (state.draw ? 'Stalemate' : `${SIDE_NAME[state.winner]} wins`)
-      : `${SIDE_NAME[state.turn]}'s turn`;
+    const over = state.phase === 'over';
+    const lead = over ? (state.draw ? null : state.winner) : state.turn;
+    const turnColor = lead == null ? '#e8e2d6' : SIDE_HEX[lead];
+    const turnText = over
+      ? (state.draw ? 'Stalemate' : `${SIDE_NAME[state.winner]} wins!`)
+      : `Move ${state.moveNo || 1} · ${SIDE_NAME[state.turn]} to move`;
+    const key = `${state.phase}|${lead}|${state.moveNo || 1}`;
+    if (key !== shownTurn) {
+      shownTurn = key;
+      turnPulse = 1;
+    }
+    for (const side of [0, 1]) {
+      // During play only the mover's edge glows; at the end both edges take
+      // the winner's colour.
+      const bar = turnBars[side];
+      bar.visible = over ? lead != null : side === state.turn;
+      bar.material.color.setHex(SIDE_GLOW[over && lead != null ? lead : side]);
+      sideLabels[side].material.opacity = over || side === state.turn ? 1 : 0.35;
+    }
+    turnSprite.userData.base = over ? [0.42, 0.105] : [0.38, 0.095];
+    turnSprite.position.y = over ? 0.16 : 0.1;
     const selId = state.selected && state.board[state.selected.r]?.[state.selected.c]?.id;
     for (const mesh of meshes.values()) mesh.userData.chosen = mesh.userData.id === selId;
 
     setSpriteText(turnSprite, turnText, turnColor);
 
-    endPanel.visible = state.phase === 'over';
+    // When a monarch falls, the end panel waits until it has hit the board.
+    const falling = state.fallen && !meshes.get(state.fallen.id)?.userData.fall?.landed;
+    endPanel.visible = state.phase === 'over' && !falling;
     if (state.phase === 'over') {
-      const title = state.draw ? 'The court is locked' : 'The monarch is captured';
+      const title = state.draw ? 'The court is locked' : `${SIDE_NAME[state.winner]} wins!`;
       const sub = state.draw ? 'Neither side can move' : `${SIDE_NAME[state.winner]} takes the court`;
       const prev = plaque.material;
       plaque.material = makePanelMaterial(title, sub);
@@ -316,6 +387,19 @@ export function createTabletop(scene) {
 
   function update(dt) {
     clock.t += dt;
+    turnPulse = Math.max(0, turnPulse - dt * 1.6);
+    // Pop the turn label when the move changes hands, then keep it breathing.
+    const beat = 1 + Math.sin((1 - turnPulse) * Math.PI) * 0.35 * (turnPulse > 0 ? 1 : 0);
+    const [bw, bh] = turnSprite.userData.base || [0.3, 0.075];
+    turnSprite.scale.set(bw * beat, bh * beat, 1);
+    turnSprite.material.opacity = 0.85 + 0.15 * Math.sin(clock.t * 3);
+    for (const bar of turnBars) bar.material.opacity = Math.min(1, 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(clock.t * 4)) + turnPulse * 0.3);
+    for (let side = 0; side < 2; side++) {
+      const label = sideLabels[side];
+      const active = label.material.opacity > 0.5;
+      const s = active ? 1.25 + 0.06 * Math.sin(clock.t * 4) : 1;
+      label.scale.set(labelScale[0] * s, labelScale[1] * s, 1);
+    }
     const pulse = 1 + Math.sin(clock.t * 5) * 0.08;
     for (const m of markers) {
       if (m.userData.marker) m.scale.set(pulse, 1, pulse);
@@ -327,7 +411,30 @@ export function createTabletop(scene) {
         const k = Math.min(1, data.tween.t / data.tween.dur);
         const e = 1 - (1 - k) ** 3;
         mesh.position.lerpVectors(data.tween.from, data.tween.to, e);
-        if (k >= 1) data.tween = null;
+        if (k >= 1) {
+          data.tween = null;
+          sfx.onLand?.({ id: data.id, type: data.type, side: data.side }, data.landKind || 'place');
+          data.landKind = null;
+        }
+      } else if (data.fall) {
+        // Topple about the base, overshoot a little, and settle on its side.
+        const f = data.fall;
+        f.t += dt;
+        const k = Math.min(1, f.t / 0.55);
+        let ang = (Math.PI / 2) * k * k;
+        if (k >= 1) {
+          const b = Math.min(1, (f.t - 0.55) / 0.35);
+          ang = Math.PI / 2 - Math.sin(b * Math.PI) * 0.12 * (1 - b);
+          if (!f.landed) {
+            f.landed = true;
+            endPanel.visible = true;
+            rebuildPickables();
+            sfx.onFall?.({ id: data.id, type: data.type, side: data.side });
+          }
+        }
+        mesh.quaternion.setFromAxisAngle(f.axis, ang).multiply(f.q0);
+        mesh.position.copy(f.base);
+        mesh.position.y = f.base.y + Math.sin(ang) * 0.012;
       } else if (!data.slay && !data.held) {
         const base = squareLocal(data.r, data.c);
         mesh.position.x = base.x;
