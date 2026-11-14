@@ -1,7 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+    <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+<style>
+#boot { position: fixed; inset: 0; display: grid; place-items: center; z-index: 50;
+  background: #100e0c; color: #f3ead7; font: 18px/1.5 system-ui, sans-serif; text-align: center; padding: 24px; }
+#boot b { color: #e6c27a; letter-spacing: .08em; }
+#boot.err b { color: #ff7a6a; }
+</style>
+<script>
+(function () {
+  var shown = false;
+  function box() { return document.getElementById('boot'); }
+  function fail(msg) {
+    var b = box(); if (!b || shown) return; shown = true;
+    b.className = 'err';
+    b.innerHTML = '<div><b>CROWNFALL COULD NOT START</b><br>' + String(msg).replace(/</g, '&lt;') +
+      '<br><br>Reload the page. If it keeps happening, tell Claude this message.</div>';
+  }
+  window.addEventListener('error', function (e) {
+    // Only code failures stop the game; a missing font or image does not.
+    var el = e.target;
+    if (el && el !== window && el.tagName !== 'SCRIPT') return;
+    fail(e.message || ('Could not load ' + ((el && el.src) || 'a game file') + '.'));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) { fail((e.reason && e.reason.message) || e.reason); });
+  // Hide the loading screen once the game has put its 3D canvas on the page.
+  var started = Date.now();
+  var t = setInterval(function () {
+    if (document.querySelector('canvas')) { clearInterval(t); var b = box(); if (b && !shown) b.remove(); }
+    else if (Date.now() - started > 15000) { clearInterval(t); fail('Timed out loading the game files.'); }
+  }, 200);
+})();
+</script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#100e0c" />
@@ -10,9 +41,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Outfit:wght@380;500;640&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="src/style.css" />
+    <link rel="stylesheet" href="src/style.css?v=8878fa3" />
   </head>
   <body>
+    <div id="boot"><div><b>CROWNFALL</b><br>Loading…</div></div>
     <div id="overlay">
       <div id="hurt"></div>
       <div id="fade"><p id="fade-text"></p></div>
@@ -75,6 +107,6 @@
         <button id="btn-move" type="button" class="hidden">Move board</button>
       </div>
     </div>
-    <script type="module" src="src/main.js"></script>
+    <script type="module" src="src/main.js?v=8878fa3"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=8878fa3';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=8878fa3';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=8878fa3';
 import {
   advanceTurn,
   createGame,
@@ -9,9 +9,9 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js';
-import { createTabletop, SQ, squareLocal } from './tabletop.js';
-import { createCombat, INLINE_ARENA } from './combat.js';
+} from './rules.js?v=8878fa3';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=8878fa3';
+import { createCombat, INLINE_ARENA } from './combat.js?v=8878fa3';
 import {
   isMuted,
   playDefeat,
@@ -21,7 +21,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js';
+} from './audio.js?v=8878fa3';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
