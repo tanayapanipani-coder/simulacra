@@ -382,7 +382,11 @@ export function createRig(root) {
   function driveArcher(dt, state) {
     const draw = clamp01(state.draw ?? 0);
     const since = state.sinceShot ?? 99;
-    const raise = ease(clamp01(draw / 0.35));
+    // The bow stays trained on the target through the whole cycle: reaching
+    // for an arrow and nocking happen with the bow already up. Only a short
+    // recoil right after the release dips it.
+    const recoil = since < 0.3 ? Math.sin((since / 0.3) * Math.PI) * 0.12 : 0;
+    const raise = 1 - recoil;
     const pull = ease(clamp01((draw - 0.25) / 0.75));
 
     const pose = copyPose(ARCHER_STANCE);
@@ -397,9 +401,9 @@ export function createRig(root) {
       _aimL.set(0.9, 0.55, 0.5).multiplyScalar(8);
     }
 
-    // Bow arm: low ready while nocking, raised to draw. Raised, the bow hand
-    // sits on the line from the anchor (chin) to the target, as far out as
-    // the arm reaches, so the drawn arrow points straight at the target.
+    // Bow arm: the bow hand sits on the line from the anchor (chin) to the
+    // target, as far out as the arm reaches, so the bow and the drawn arrow
+    // point straight at the target.
     const shoulderL = j.shoulderL.position;
     _aimDir.subVectors(_aimL, ANCHOR).normalize();
     _tmp.subVectors(ANCHOR, shoulderL);
@@ -418,7 +422,7 @@ export function createRig(root) {
 
     // Steer the bow before the string hand so the nock point is current.
     j.wristL.updateWorldMatrix(true, false);
-    placeBow(raise);
+    placeBow(raise, _aimL);
 
     // String hand: follow-through, reach to the quiver, nock, then draw.
     let kR = 11;
@@ -451,15 +455,17 @@ export function createRig(root) {
     updateString(since);
   }
 
-  function placeBow(raise = 0) {
+  function placeBow(raise = 0, target = null) {
     const bow = j.bow;
     j.wristL.getWorldPosition(_tmp);
     j.spine.worldToLocal(_tmp);
     bow.position.copy(_tmp);
-    // Bow faces along the bow arm at low ready and along the anchor line once
-    // raised; limbs stay upright with a slight cant.
+    // Raised, the bow faces straight from the bow hand at the target (spine
+    // space); lowered (dying), it follows the bow arm. Limbs stay upright
+    // with a slight cant.
     _bx.subVectors(_tmp, j.shoulderL.position).normalize();
-    _tmp2.subVectors(_tmp, ANCHOR).normalize();
+    if (target) _tmp2.subVectors(target, _tmp).normalize();
+    else _tmp2.subVectors(_tmp, ANCHOR).normalize();
     _bx.lerp(_tmp2, raise).normalize();
     _by.copy(_up).addScaledVector(_bx, -_up.dot(_bx)).normalize();
     _bz.crossVectors(_bx, _by);
