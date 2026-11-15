@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=76b5cfd';
+import { clothTex, steelTex } from './textures.js?v=f6d2c2e';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -12,6 +12,7 @@ import { clothTex, steelTex } from './textures.js?v=76b5cfd';
 
 const RECOLOR = /* glsl */ `
 #include <map_fragment>
+const vec3 SKIRT = vec3(0.075, 0.008, 0.013);
 {
   // Long sleeves, painted on the arm itself so they fit and move exactly:
   // anything along the line from shoulder to wrist (in the bind pose, in
@@ -25,10 +26,17 @@ const RECOLOR = /* glsl */ `
   bool onArm = along > 0.04 && along < 0.975 && across < 10.0;
   vec3 c0 = diffuseColor.rgb;
   float lum0 = dot(c0, vec3(0.2126, 0.7152, 0.0722));
+  float shade = clamp(lum0 * 1.4, 0.35, 1.1);
   if (onArm) {
     // Velvet with the arm's own light and shade; a gold cuff at the wrist.
-    float shade = clamp(lum0 * 1.4, 0.35, 1.1);
     diffuseColor.rgb = along > 0.93 ? vec3(0.55, 0.36, 0.09) * shade : vec3(0.3, 0.025, 0.045) * shade;
+  } else if (bp.y < uWaist && bp.x < 24.0) {
+    // Below the waist everything is the skirt's cloth, so nothing of the
+    // legs or trousers can show where the skirt moves.
+    diffuseColor.rgb = SKIRT * clamp(lum0 * 1.6, 0.75, 1.1);
+  } else if (bp.y < uBust && bp.x < 24.0) {
+    // The torso from the waist to the bust is all bodice: one complete top.
+    diffuseColor.rgb = vec3(0.3, 0.025, 0.045) * clamp(lum0 * 1.4, 0.45, 1.1);
   }
 }
 {
@@ -142,8 +150,13 @@ function along(geoFn, mat, a, b, cover = 1, from = 0) {
 function skirt(top, bottom) {
   const g = new THREE.Group();
   const len = top - bottom;
-  const velvet = new THREE.MeshStandardMaterial({ color: 0x4a0c14, roughness: 0.85, map: clothTex(), side: THREE.DoubleSide });
-  const geo = new THREE.CylinderGeometry(0.125, 0.34, len, 32, 6, true);
+  // Same colour the shader gives everything below her waist, so the two
+  // read as one cloth.
+  const velvet = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
+  velvet.color.setRGB(0.075, 0.008, 0.013);
+  // Hugging the waist at the top (her hips below are painted the same
+  // cloth, so the skirt and body read as one), flaring to the hem.
+  const geo = new THREE.CylinderGeometry(0.155, 0.38, len, 40, 8, true);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const k = (len / 2 - pos.getY(i)) / len;
@@ -157,14 +170,14 @@ function skirt(top, bottom) {
   body.position.y = -len / 2;
   g.add(body);
   const gold = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.35 });
-  const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.345, 0.35, 0.035, 32, 1, true), gold);
+  const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.385, 0.39, 0.035, 40, 1, true), gold);
   hem.position.y = -len + 0.03;
   g.add(hem);
-  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.013, 6, 32), new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.7 }));
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.158, 0.016, 6, 40), new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.7 }));
   belt.rotation.x = Math.PI / 2;
   g.add(belt);
   const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.01), gold);
-  buckle.position.set(0, 0, 0.135);
+  buckle.position.set(0, 0, 0.168);
   g.add(buckle);
   // A waist is wider than it is deep.
   g.scale.set(1, 1, 0.8);
@@ -185,7 +198,9 @@ export function dressMedieval(avatar) {
 
   // Where the left arm runs in the bind pose (the right mirrors it), from
   // the skeleton's own bind matrices.
-  const arm = { shoulder: new THREE.Vector3(17.2, 138, -6.1), wrist: new THREE.Vector3(52.4, 106.3, 3.1) };
+  const arm = { shoulder: new THREE.Vector3(17.2, 138, -6.1), wrist: new THREE.Vector3(52.4, 106.3, 3.1), waist: 103, bust: 127 };
+  let pelvisY = 92.3;
+  let spineY = 128.9;
   model.traverse((o) => {
     if (!o.isSkinnedMesh) return;
     o.skeleton.bones.forEach((bone, i) => {
@@ -193,8 +208,14 @@ export function dressMedieval(avatar) {
       const at = () => new THREE.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[i].clone().invert());
       if (n.endsWith('l upperarm')) arm.shoulder.copy(at());
       if (n.endsWith('l hand')) arm.wrist.copy(at());
+      if (n.endsWith('pelvis')) pelvisY = at().y;
+      if (n.endsWith('spine2')) spineY = at().y;
     });
   });
+  // The waistline a little above the hip joint; the bodice runs up to just
+  // under the bust.
+  arm.waist = pelvisY + (spineY - pelvisY) * 0.29;
+  arm.bust = spineY - 2;
   arm.shoulder.x = Math.abs(arm.shoulder.x);
   arm.wrist.x = Math.abs(arm.wrist.x);
 
@@ -208,14 +229,16 @@ export function dressMedieval(avatar) {
       m.onBeforeCompile = (shader) => {
         shader.uniforms.uShoulder = { value: arm.shoulder };
         shader.uniforms.uWrist = { value: arm.wrist };
+        shader.uniforms.uWaist = { value: arm.waist };
+        shader.uniforms.uBust = { value: arm.bust };
         shader.vertexShader = shader.vertexShader
           .replace('#include <common>', '#include <common>\nvarying vec3 vBindPos;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindPos = (bindMatrix * vec4(position, 1.0)).xyz;');
         shader.fragmentShader = shader.fragmentShader
-          .replace('#include <common>', '#include <common>\nvarying vec3 vBindPos;\nuniform vec3 uShoulder;\nuniform vec3 uWrist;')
+          .replace('#include <common>', '#include <common>\nvarying vec3 vBindPos;\nuniform vec3 uShoulder;\nuniform vec3 uWrist;\nuniform float uWaist;\nuniform float uBust;')
           .replace('#include <map_fragment>', RECOLOR);
       };
-      m.customProgramCacheKey = () => 'medieval-dye-2';
+      m.customProgramCacheKey = () => 'medieval-dye-3';
       m.needsUpdate = true;
     }
   });

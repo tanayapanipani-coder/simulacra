@@ -1,4 +1,4 @@
-import { SIZE, inBounds, options } from './rules.js?v=76b5cfd';
+import { SIZE, inBounds, options } from './rules.js?v=f6d2c2e';
 
 // Computer opponent for the side whose turn it is in `state`.
 //

@@ -12,14 +12,14 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=76b5cfd';
-import { createAvatar } from '../webxr/avatar.js?v=76b5cfd';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=76b5cfd';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=76b5cfd';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=f6d2c2e';
+import { createAvatar } from '../webxr/avatar.js?v=f6d2c2e';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=f6d2c2e';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=f6d2c2e';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=76b5cfd';
-import { dressMedieval } from './medieval.js?v=76b5cfd';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=76b5cfd';
+import { TOP, squareLocal } from './tabletop.js?v=f6d2c2e';
+import { dressMedieval } from './medieval.js?v=f6d2c2e';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=f6d2c2e';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
