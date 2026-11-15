@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FORE_LEN, SHIN_LEN, THIGH_LEN, UPPER_LEN } from './ranger.js?v=17c8dff';
+import { FORE_LEN, SHIN_LEN, THIGH_LEN, UPPER_LEN } from './ranger.js?v=2d3f255';
 
 // Procedural joint rig for the combat rangers.
 //
@@ -238,6 +238,7 @@ const QUIVER_REACH = new THREE.Vector3(-0.25, 0.72, -0.2);
  *   'idle'   { look }
  *   'run'    { speed, look }               gait phase advances with speed
  *   'strike' { t, variant, look }          t < 0 recovery, 0..0.62 windup and cut
+ *   'charge' { t, variant, speed, look }   running in while swinging
  *   'archer' { draw, sinceShot, aim }      draw 0..1, sinceShot seconds since release
  *   'die'    { t }
  * look / aim are world-space points.
@@ -527,6 +528,16 @@ export function createRig(root) {
       const { pose, gaitFeet } = runPose(dt, state.speed ?? 2.5);
       bodyAndLegs(pose, dt, { kBody: 12, gaitFeet });
       armsFK(pose, dt, 12);
+    } else if (action === 'charge') {
+      // Running in while swinging: the legs keep the gait, the arms and torso
+      // carry the sword cut.
+      const { pose, gaitFeet } = runPose(dt, state.speed ?? 2.5);
+      const cut = swordPose(state);
+      for (const k of ['shoulderR', 'elbowR', 'wristR', 'shoulderL', 'elbowL', 'wristL']) pose[k] = cut[k];
+      pose.spine = [Math.max(pose.spine[0], cut.spine[0] * 0.8 + 0.1), cut.spine[1], 0];
+      const fast = (state.t ?? 0) > 0.38;
+      bodyAndLegs(pose, dt, { kBody: 14, gaitFeet });
+      armsFK(pose, dt, fast ? 34 : 15);
     } else if (action === 'strike') {
       const pose = swordPose(state);
       const fast = (state.t ?? 0) > 0.38;

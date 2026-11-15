@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=17c8dff';
+import { clashBlurb } from './rules.js?v=2d3f255';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=17c8dff';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=17c8dff';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=17c8dff';
-import { createWarZone } from './war.js?v=17c8dff';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=17c8dff';
+} from './pieces.js?v=2d3f255';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=2d3f255';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=2d3f255';
+import { createWarZone } from './war.js?v=2d3f255';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=2d3f255';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -82,6 +82,9 @@ function swordPose(out, pitch, lean, spin = Math.PI / 2) {
   return out;
 }
 const SWORD_UP = 1.25;
+// Swordsmen start swinging this far out, and a cut lands within this reach.
+const SWING_FROM = 5.5;
+const SWORD_REACH = 1.75;
 const _lockOrigin = new THREE.Vector3();
 const _lockDir = new THREE.Vector3();
 const _lockTo = new THREE.Vector3();
@@ -446,6 +449,31 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     playDeflect();
     hooks.haptic?.(0.7);
     blocks += 1;
+  }
+
+  // A swordsman's cut that reaches the player: blocked by the shield (he
+  // staggers back) or it hurts.
+  function landBlow(e, dist) {
+    if (shieldCovers(e.mesh.position.x, 1.25, e.mesh.position.z)) {
+      blockHit(e.mesh.position.x, 1.25, e.mesh.position.z);
+      e.windup = -0.55;
+      e.mesh.position.x -= (_dir.x / dist) * 0.35;
+      e.mesh.position.z -= (_dir.z / dist) * 0.35;
+    } else {
+      damagePlayer();
+      e.windup = -0.28;
+    }
+    e.swing += 1;
+  }
+
+  // The swish of a swordsman's blade as it comes down, if he is near enough
+  // to hear.
+  function swingWhoosh(e, dist) {
+    if (e.windup >= 0.42 && !e.whooshed) {
+      e.whooshed = true;
+      if (dist < 6) playWhoosh();
+    }
+    if (e.windup < 0.42) e.whooshed = false;
   }
 
   function damagePlayer() {
@@ -1089,13 +1117,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {
-      // The first swordsman charges; the second sets off a second behind him
-      // so he joins the attack straight after, and the rest keep coming
+      // The first swordsman charges; the second appears 0.3 s behind him so
+      // they come at the player together, and the rest keep coming
       // (1.8 s shrinking to 1.2 s), at most three on the field, and straight
       // away whenever the field is empty.
       spawnT += dt;
       const alive = enemies.filter((e) => e.alive && e.kind === 'sword').length;
-      const gap = spawned <= 1 ? 1.0 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
+      const gap = spawned <= 1 ? 0.3 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
       if (spawned < quota && alive < 3 && (spawnT > gap || (alive === 0 && spawnT > 0.5))) {
         spawnSwordsman();
         spawnT = 0;
@@ -1124,28 +1152,33 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       e.mesh.rotation.y += turn * (1 - Math.exp(-10 * dt));
 
       if (e.kind === 'sword') {
+        const speed = e.speed || TUNING.meleeSpeed;
         if (dist > 1.2) {
-          const step = (e.speed || TUNING.meleeSpeed) * dt;
+          const step = speed * dt;
           e.mesh.position.x += (_dir.x / dist) * step;
           e.mesh.position.z += (_dir.z / dist) * step;
-          rig?.drive(dt, { action: 'run', speed: e.speed || TUNING.meleeSpeed, look: _camPos });
-          e.windup = 0;
+          if (dist < SWING_FROM) {
+            // Charging in already swinging: cuts start well before he
+            // reaches the player, and land only once he is within reach.
+            e.windup += dt;
+            rig?.drive(dt, { action: 'charge', t: e.windup, variant: e.swing, speed, look: _camPos });
+            swingWhoosh(e, dist);
+            if (e.windup > 0.62) {
+              if (dist <= SWORD_REACH) landBlow(e, dist);
+              else {
+                e.windup = -0.2;
+                e.swing += 1;
+              }
+            }
+          } else {
+            rig?.drive(dt, { action: 'run', speed, look: _camPos });
+            e.windup = 0;
+          }
         } else {
           e.windup += dt;
           rig?.drive(dt, { action: 'strike', t: e.windup, variant: e.swing, look: _camPos });
-          if (e.windup > 0.62) {
-            if (shieldCovers(e.mesh.position.x, 1.25, e.mesh.position.z)) {
-              // Blocked: the blow rings off the shield and he staggers back.
-              blockHit(e.mesh.position.x, 1.25, e.mesh.position.z);
-              e.windup = -0.55;
-              e.mesh.position.x -= (_dir.x / dist) * 0.35;
-              e.mesh.position.z -= (_dir.z / dist) * 0.35;
-            } else {
-              damagePlayer();
-              e.windup = -0.28;
-            }
-            e.swing += 1;
-          }
+          swingWhoosh(e, dist);
+          if (e.windup > 0.62) landBlow(e, dist);
         }
         if (hot > 0 && usesSword()) {
           const chest = _local.set(e.mesh.position.x, 1.25, e.mesh.position.z);
