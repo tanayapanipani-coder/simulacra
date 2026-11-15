@@ -12,13 +12,13 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=2eb7fa6';
-import { createAvatar } from '../webxr/avatar.js?v=2eb7fa6';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=2eb7fa6';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=2eb7fa6';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=23810cb';
+import { createAvatar } from '../webxr/avatar.js?v=23810cb';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=23810cb';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=23810cb';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=2eb7fa6';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=2eb7fa6';
+import { TOP, squareLocal } from './tabletop.js?v=23810cb';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=23810cb';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=2eb7fa6';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=2eb7fa6';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=2eb7fa6';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=23810cb';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=23810cb';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=23810cb';
 import {
   advanceTurn,
   createGame,
@@ -9,12 +9,12 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=2eb7fa6';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=2eb7fa6';
-import { createCombat, INLINE_ARENA } from './combat.js?v=2eb7fa6';
-import { chooseMove } from './ai.js?v=2eb7fa6';
-import { createSim } from './sim.js?v=2eb7fa6';
-import { cleanCode, makeCode, openRoom } from './net.js?v=2eb7fa6';
+} from './rules.js?v=23810cb';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=23810cb';
+import { createCombat, INLINE_ARENA } from './combat.js?v=23810cb';
+import { chooseMove } from './ai.js?v=23810cb';
+import { createSim } from './sim.js?v=23810cb';
+import { cleanCode, makeCode, openRoom } from './net.js?v=23810cb';
 import {
   isMuted,
   playDefeat,
@@ -24,7 +24,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=2eb7fa6';
+} from './audio.js?v=23810cb';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');

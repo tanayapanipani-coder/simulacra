@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=2eb7fa6';
+import { clashBlurb } from './rules.js?v=23810cb';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,17 +7,17 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=2eb7fa6';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=2eb7fa6';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=2eb7fa6';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=2eb7fa6';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=2eb7fa6';
+} from './pieces.js?v=23810cb';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=23810cb';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=23810cb';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=23810cb';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=23810cb';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
 const TUNING = {
   meleeQuota: 6,
-  meleeSpeed: 2.65,
+  meleeSpeed: 3.7,
   archerCount: 4,
   archerInterval: 3.05,
   hearts: 5,
@@ -1189,13 +1189,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {
-      // The first swordsman charges; the second appears 0.2 s behind him so
+      // The first swordsman charges; the second appears right behind him so
       // they come at the player together, and the rest keep coming
       // (1.8 s shrinking to 1.2 s), at most three on the field, and straight
       // away whenever the field is empty.
       spawnT += dt;
       const alive = enemies.filter((e) => e.alive && e.kind === 'sword').length;
-      const gap = spawned <= 1 ? 0.2 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
+      const gap = spawned <= 1 ? 0 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
       if (spawned < quota && alive < 3 && (spawnT > gap || (alive === 0 && spawnT > 0.5))) {
         spawnSwordsman();
         spawnT = 0;
