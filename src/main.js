@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=11cf795';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=11cf795';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=11cf795';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=94e3e33';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=94e3e33';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=94e3e33';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=11cf795';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=11cf795';
-import { createCombat, INLINE_ARENA } from './combat.js?v=11cf795';
-import { chooseMove } from './ai.js?v=11cf795';
-import { createSim } from './sim.js?v=11cf795';
-import { cleanCode, makeCode, openRoom } from './net.js?v=11cf795';
-import { VERSION } from './version.js?v=11cf795';
+} from './rules.js?v=94e3e33';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=94e3e33';
+import { createCombat, INLINE_ARENA } from './combat.js?v=94e3e33';
+import { chooseMove } from './ai.js?v=94e3e33';
+import { createSim } from './sim.js?v=94e3e33';
+import { cleanCode, makeCode, openRoom } from './net.js?v=94e3e33';
+import { VERSION } from './version.js?v=94e3e33';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=11cf795';
+} from './audio.js?v=94e3e33';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -384,6 +384,9 @@ reticle.visible = false;
 scene.add(reticle);
 
 const raycaster = new THREE.Raycaster();
+const _boardPlane = new THREE.Plane();
+const _pickUp = new THREE.Vector3();
+const _boardHit = new THREE.Vector3();
 const ndc = new THREE.Vector2();
 const savedPos = new THREE.Vector3();
 const savedQuat = new THREE.Quaternion();
@@ -968,29 +971,27 @@ function findData(object) {
 }
 
 function pickWithRay() {
-  const hits = raycaster.intersectObjects(pickables, true);
-  const found = [];
-  for (const hit of hits) {
-    const data = findData(hit.object);
-    if (!data) continue;
-    const dup = found.some((item) => (
-      (item.id && item.id === data.id)
-      || (item.marker && data.marker && item.r === data.r && item.c === data.c)
-      || (item.action && data.action)
-    ));
-    if (!dup) found.push(data);
+  if (game.phase === 'over') {
+    const hits = raycaster.intersectObjects(pickables, true);
+    for (const hit of hits) {
+      const data = findData(hit.object);
+      if (data?.action) return data;
+    }
+    return null;
   }
-  if (!found.length) return null;
-  if (game.selected) {
-    const behind = found.filter((item) => !(
-      item.id && item.r === game.selected.r && item.c === game.selected.c
-    ));
-    const marker = behind.find((item) => item.marker);
-    if (marker) return marker;
-    const enemy = behind.find((item) => item.id && item.side !== game.turn);
-    if (enemy) return enemy;
-  }
-  return found[0];
+  // The square under the ray, not the piece standing on it. A unit in front
+  // no longer hides the tile behind it.
+  board.updateMatrixWorld(true);
+  _pickUp.set(0, 1, 0).transformDirection(board.matrixWorld);
+  board.getWorldPosition(_boardHit);
+  _boardPlane.setFromNormalAndCoplanarPoint(_pickUp, _boardHit);
+  if (!raycaster.ray.intersectPlane(_boardPlane, _boardHit)) return null;
+  board.worldToLocal(_boardHit);
+  const square = squareUnder(_boardHit.x, _boardHit.z);
+  if (!square) return null;
+  const piece = game.board[square.r][square.c];
+  if (piece) return { id: piece.id, type: piece.type, side: piece.side, r: square.r, c: square.c };
+  return { r: square.r, c: square.c, marker: true };
 }
 
 function pickAt(x, y) {

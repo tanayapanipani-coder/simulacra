@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=11cf795';
-import { playBoom } from './audio.js?v=11cf795';
-import { mudTex, stoneTex, woodTex, steelTex } from './textures.js?v=11cf795';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=94e3e33';
+import { playBoom } from './audio.js?v=94e3e33';
+import { mudTex, stoneTex, woodTex, steelTex } from './textures.js?v=94e3e33';
 
 // The Blender scenes carry flat vertex colours. On load, every surface gets
 // tiling detail (mud and gravel, dressed stone, wood grain, pitted iron) laid
