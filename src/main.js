@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=39b44d6';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=39b44d6';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=39b44d6';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=ca1957c';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=ca1957c';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=ca1957c';
 import {
   advanceTurn,
   createGame,
@@ -9,11 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=39b44d6';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=39b44d6';
-import { createCombat, INLINE_ARENA } from './combat.js?v=39b44d6';
-import { chooseMove } from './ai.js?v=39b44d6';
-import { cleanCode, makeCode, openRoom } from './net.js?v=39b44d6';
+} from './rules.js?v=ca1957c';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=ca1957c';
+import { createCombat, INLINE_ARENA } from './combat.js?v=ca1957c';
+import { chooseMove } from './ai.js?v=ca1957c';
+import { cleanCode, makeCode, openRoom } from './net.js?v=ca1957c';
 import {
   isMuted,
   playDefeat,
@@ -23,7 +23,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=39b44d6';
+} from './audio.js?v=ca1957c';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -395,6 +395,12 @@ for (let i = 0; i < 2; i++) {
     input.primaryDown = true;
     input.primaryPressed = true;
   });
+  controller.addEventListener('squeezestart', () => {
+    controller.userData.squeezing = true;
+  });
+  controller.addEventListener('squeezeend', () => {
+    controller.userData.squeezing = false;
+  });
   controller.addEventListener('selectend', () => {
     controller.userData.selecting = false;
     input.primaryDown = false;
@@ -458,7 +464,8 @@ const combat = createCombat({
       const left = controllers.find((c) => c.userData.connected && c.userData.handedness === 'left' && !c.userData.inputSource?.hand);
       return left ? grips[controllers.indexOf(left)] : null;
     },
-    rightSelecting: () => !!findHand('right')?.userData.selecting,
+    // Trigger or grip button: either one holds the bow string.
+    rightSelecting: () => !!(findHand('right')?.userData.selecting || findHand('right')?.userData.squeezing),
     lock: (on) => crosshair.classList.toggle('locked', on),
     floorBased: () => floorBased && renderer.xr.isPresenting,
     isAR: () => xrKind === 'ar' && renderer.xr.isPresenting,

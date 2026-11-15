@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=39b44d6';
+import { clashBlurb } from './rules.js?v=ca1957c';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=39b44d6';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=39b44d6';
-import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=39b44d6';
-import { createWarZone } from './war.js?v=39b44d6';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=39b44d6';
+} from './pieces.js?v=ca1957c';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=ca1957c';
+import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=ca1957c';
+import { createWarZone } from './war.js?v=ca1957c';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=ca1957c';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -61,6 +61,7 @@ const _fwdW = new THREE.Vector3();
 const _zW = new THREE.Vector3();
 const _xW = new THREE.Vector3();
 const _pullW = new THREE.Vector3();
+const _upW = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
 const _vel = new THREE.Vector3();
 const _edge = new THREE.Vector3();
@@ -702,13 +703,22 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   }
 
   // Pull the string with a hand or controller at `point` (world space):
-  // grabbing it within `radius` of the string, drawing it back along the
+  // grabbing it while within `radius` of the string or grip, drawing it back along the
   // bow, and letting go to shoot along the arrow, onto the lock if any.
-  function pullString(point, pulling, justStarted, radius, dt) {
+  // Full draw is a little under a real archer's arm length.
+  const FULL_DRAW = 0.45;
+  let nearString = false;
+  function pullString(point, pulling, radius, dt) {
     bow.localToWorld(_nockW.set(0, 0, bow.userData.restZ));
-    if (justStarted && reload <= 0 && point.distanceTo(_nockW) < radius) {
+    bow.localToWorld(_gripW.copy(bow.userData.grip));
+    // The hand can catch the string anywhere near it or the bow's grip, and
+    // in either order: press then reach, or reach then press.
+    const near = reload <= 0 && Math.min(point.distanceTo(_nockW), point.distanceTo(_gripW) + 0.05) < radius;
+    if (near && !nearString && !stringHeld) hooks.haptic?.(0.12);
+    nearString = near;
+    if (pulling && !stringHeld && near) {
       stringHeld = true;
-      hooks.haptic?.(0.25);
+      hooks.haptic?.(0.35);
     }
     if (stringHeld && pulling) {
       bow.worldToLocal(_nockL.copy(point));
@@ -717,12 +727,12 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       _nockL.y = THREE.MathUtils.clamp(_nockL.y, -0.08, 0.08);
       _nockL.z = Math.max(bow.userData.restZ, _nockL.z);
       const was = draw;
-      draw = THREE.MathUtils.clamp((_nockL.z - bow.userData.restZ) / 0.55, 0, 1);
-      if (draw >= 1 && was < 1) hooks.haptic?.(0.35);
+      draw = THREE.MathUtils.clamp((_nockL.z - bow.userData.restZ) / FULL_DRAW, 0, 1);
+      if (draw >= 1 && was < 1) hooks.haptic?.(0.5);
     }
     if (stringHeld && !pulling) {
       stringHeld = false;
-      if (draw > 0.2 && reload <= 0) {
+      if (draw > 0.15 && reload <= 0) {
         // Fly along the drawn arrow: from the nock through the grip.
         bow.localToWorld(_nockW.copy(_nockL));
         bow.localToWorld(_gripW.copy(bow.userData.grip));
@@ -741,17 +751,34 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (!stringHeld) draw = Math.max(0, draw - dt * 3);
   }
 
+  // The string glows gold when the drawing hand can catch it, and brighter
+  // while it is held.
+  let stringMat = null;
+  function glowString() {
+    if (!stringMat) {
+      stringMat = new THREE.MeshStandardMaterial({ color: 0xd8c39a, emissive: 0xffc860, emissiveIntensity: 0, roughness: 0.5 });
+      bow.userData.stringTop.material = stringMat;
+      bow.userData.stringBot.material = stringMat;
+    }
+    stringMat.emissiveIntensity = stringHeld ? 1.6 : nearString ? 0.9 : 0;
+  }
+
   // Two controllers: the bow is held in the left one (limbs along its
   // handle, facing where it points) and the right one pulls the string.
-  let rightWasSelecting = false;
   function poseFromControllers(dt) {
     const leftGrip = hooks.leftGrip?.();
     const leftRay = hooks.leftHand?.();
     if (!leftGrip || !leftRay) return;
     leftGrip.getWorldPosition(_gripPos);
-    _y.copy(_negZ).applyQuaternion(leftGrip.getWorldQuaternion(_q1)); // along the handle
-    _fwdW.copy(_negZ).applyQuaternion(leftRay.getWorldQuaternion(_q2)); // where it points
-    _fwdW.addScaledVector(_y, -_fwdW.dot(_y)).normalize();
+    // The bow faces where the left controller points and stands upright,
+    // leaning a little with the wrist's roll. (Following the controller's
+    // handle tilted it 40-60 degrees forward on Quest controllers.)
+    leftRay.getWorldQuaternion(_q2);
+    _fwdW.copy(_negZ).applyQuaternion(_q2).normalize();
+    _y.set(0, 1, 0).lerp(_upW.set(0, 1, 0).applyQuaternion(_q2), 0.3);
+    _y.addScaledVector(_fwdW, -_y.dot(_fwdW));
+    if (_y.lengthSq() < 1e-6) _y.set(0, 0, 1).addScaledVector(_fwdW, -_fwdW.z);
+    _y.normalize();
     _zW.copy(_fwdW).negate();
     _xW.crossVectors(_y, _zW);
     _basis.makeBasis(_xW, _y, _zW);
@@ -764,9 +791,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     const selecting = !!hooks.rightSelecting?.();
     if (rightGrip) {
       rightGrip.getWorldPosition(_pullW);
-      pullString(_pullW, selecting, selecting && !rightWasSelecting, 0.22, dt);
+      pullString(_pullW, selecting, 0.3, dt);
     }
-    rightWasSelecting = selecting;
+    glowString();
   }
 
   // Hand-tracking: put the weapon in the fist, and let the right hand pinch
@@ -811,7 +838,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     const gap = right ? pinch(right, _pinchPt) : null;
     const was = pinching;
     pinching = gap != null && (was ? gap < 0.035 : gap < 0.02);
-    pullString(_pinchPt, pinching, pinching && !was, 0.1, dt);
+    pullString(_pinchPt, pinching, 0.16, dt);
+    glowString();
   }
 
   function refreshLook() {

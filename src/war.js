@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=39b44d6';
-import { playBoom } from './audio.js?v=39b44d6';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=ca1957c';
+import { playBoom } from './audio.js?v=ca1957c';
 
 // Set pieces modelled in Blender (tools/blender/war_props.py): ruined walls,
 // a wrecked catapult, a burnt siege tower, an overturned cart, torn tents, a
