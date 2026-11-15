@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=ca1957c';
+import { clashBlurb } from './rules.js?v=cf5e2b5';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,16 +7,16 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=ca1957c';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=ca1957c';
-import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=ca1957c';
-import { createWarZone } from './war.js?v=ca1957c';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=ca1957c';
+} from './pieces.js?v=cf5e2b5';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=cf5e2b5';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=cf5e2b5';
+import { createWarZone } from './war.js?v=cf5e2b5';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=cf5e2b5';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
 const TUNING = {
-  meleeQuota: 5,
+  meleeQuota: 6,
   meleeSpeed: 2.65,
   archerCount: 4,
   archerInterval: 3.05,
@@ -156,6 +156,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   let quota = TUNING.meleeQuota;
   let vulnerable = false;
   let spawnT = 0;
+  let spawned = 0;
   let draw = 0;
   let reload = 0;
   let swingU = -1;
@@ -314,8 +315,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
   function spawnSwordsman() {
     const mesh = createSoldier('sword', paletteForEnemy(attackerSide));
-    // Straight down the lane from the attacking end.
-    const a = (Math.random() - 0.5) * 0.25;
+    // From the attacking end in a loose column: each new swordsman takes a
+    // slightly different line, and later ones come on a little faster.
+    spawned += 1;
+    const a = [0, 0.22, -0.22][(spawned - 1) % 3] + (Math.random() - 0.5) * 0.1;
     const dist = 8.6;
     mesh.position.set(Math.sin(a) * dist, 0, -Math.cos(a) * dist);
     group.add(mesh);
@@ -327,6 +330,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       swing: Math.floor(Math.random() * 2),
       seed: Math.random() * 10,
       dying: 0,
+      speed: TUNING.meleeSpeed * (1 + Math.min(spawned - 1, 5) * 0.04),
     });
   }
 
@@ -375,7 +379,6 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     e.alive = false;
     e.dying = 0.001;
     kills += 1;
-    spawnT = 0;
     sparks.burst(point || e.mesh.position.clone().setY(1.2), 0xffe1b0, 10, 3.5);
     playHit();
     hooks.haptic?.(0.7);
@@ -457,6 +460,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     quota = TUNING.meleeQuota;
     vulnerable = false;
     spawnT = 0;
+    spawned = 0;
     draw = 0;
     reload = 0;
     swingU = -1;
@@ -823,24 +827,75 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       return;
     }
 
+    // Bow hand. Tracking blips keep the bow where it was for half a second
+    // instead of dropping it.
     const left = trackedHand('left');
-    if (!left || !bowGrip(left, _gripPos, _gripQuat)) {
-      bow.visible = false;
-      stringHeld = false;
-      return;
+    if (left && bowGrip(left, _gripPos, _gripQuat)) {
+      bowLostT = 0;
+      // Upright with a little cant from the wrist; while drawing, the bow
+      // lines up from the drawing hand through the bow hand, so the arrow
+      // flies where the two hands point.
+      _y.set(0, 1, 0).lerp(_upW.set(0, 1, 0).applyQuaternion(_gripQuat), 0.25);
+      if (stringHeld) _fwdW.subVectors(_gripPos, lastPull).normalize();
+      else _fwdW.copy(_negZ).applyQuaternion(_gripQuat);
+      _y.addScaledVector(_fwdW, -_y.dot(_fwdW));
+      if (_y.lengthSq() < 1e-6) _y.set(0, 0, 1);
+      _y.normalize();
+      _zW.copy(_fwdW).negate();
+      _xW.crossVectors(_y, _zW);
+      _basis.makeBasis(_xW, _y, _zW);
+      _gripQuat.setFromRotationMatrix(_basis);
+      // Smooth out tracking jitter; snap when the bow first appears.
+      if (!bow.visible) {
+        bow.position.copy(_gripPos);
+        bow.quaternion.copy(_gripQuat);
+      } else {
+        bow.position.lerp(_gripPos, 1 - Math.exp(-35 * dt));
+        bow.quaternion.slerp(_gripQuat, 1 - Math.exp(-(stringHeld ? 30 : 18) * dt));
+      }
+      bow.visible = true;
+    } else {
+      bowLostT += dt;
+      if (bowLostT > 0.5) {
+        bow.visible = false;
+        stringHeld = false;
+        return;
+      }
     }
-    bow.visible = true;
-    bow.position.copy(_gripPos);
-    bow.quaternion.copy(_gripQuat);
     bow.updateMatrixWorld(true);
 
+    // Drawing hand: a pinch or a closed fist holds the string. Thresholds
+    // are loose for tracking noise, and letting go only counts once it has
+    // lasted 80 ms (or the hand has been lost for 0.35 s), so a flicker
+    // never fires the arrow early.
     const right = trackedHand('right');
-    const gap = right ? pinch(right, _pinchPt) : null;
-    const was = pinching;
-    pinching = gap != null && (was ? gap < 0.035 : gap < 0.02);
-    pullString(_pinchPt, pinching, 0.16, dt);
+    let holding = false;
+    if (right) {
+      const gap = pinch(right, _pinchPt);
+      if (gap != null) lastPull.copy(_pinchPt); // where the drawing hand is
+      const pinched = gap != null && (pinching ? gap < 0.05 : gap < 0.028);
+      pinching = pinched;
+      if (pinched) {
+        lastPull.copy(_pinchPt);
+        holding = true;
+      } else if (fist(right, _pinchPt)) {
+        lastPull.copy(_pinchPt);
+        holding = true;
+      }
+      handLostT = 0;
+    } else {
+      handLostT += dt;
+    }
+    if (holding) letGoT = 0;
+    else letGoT += dt;
+    const held = holding || (stringHeld && (right ? letGoT < 0.08 : handLostT < 0.35));
+    pullString(lastPull, held, 0.18, dt);
     glowString();
   }
+  let bowLostT = 0;
+  let handLostT = 0;
+  let letGoT = 0;
+  const lastPull = new THREE.Vector3();
 
   function refreshLook() {
     const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
@@ -963,11 +1018,14 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {
-      // One at a time: the next swordsman sets off from the far end only
-      // after the one before him has fallen.
+      // The first swordsman charges alone; the rest keep coming after him,
+      // one by one, closer together as the fight goes on (2.6 s, then 2.4 s
+      // shrinking to 1.5 s), at most three on the field, and straight away
+      // whenever the field is empty.
       spawnT += dt;
       const alive = enemies.filter((e) => e.alive && e.kind === 'sword').length;
-      if (alive === 0 && spawnT > 0.7 && kills < quota) {
+      const gap = spawned <= 1 ? 2.6 : Math.max(1.5, 2.4 - (spawned - 2) * 0.2);
+      if (spawned < quota && alive < 3 && (spawnT > gap || (alive === 0 && spawnT > 0.5))) {
         spawnSwordsman();
         spawnT = 0;
       }
@@ -996,10 +1054,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
       if (e.kind === 'sword') {
         if (dist > 1.2) {
-          const step = TUNING.meleeSpeed * dt;
+          const step = (e.speed || TUNING.meleeSpeed) * dt;
           e.mesh.position.x += (_dir.x / dist) * step;
           e.mesh.position.z += (_dir.z / dist) * step;
-          rig?.drive(dt, { action: 'run', speed: TUNING.meleeSpeed, look: _camPos });
+          rig?.drive(dt, { action: 'run', speed: e.speed || TUNING.meleeSpeed, look: _camPos });
           e.windup = 0;
         } else {
           e.windup += dt;

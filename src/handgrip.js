@@ -87,6 +87,24 @@ export function pinch(hand, outPoint) {
   return _indexTip.distanceTo(_thumbTip);
 }
 
+const _palm = new THREE.Vector3();
+const _tip = new THREE.Vector3();
+/**
+ * A closed fist: the four fingertips curled in near the palm. Returns the
+ * grab point (the middle knuckle) in `outPoint`, or false.
+ */
+export function fist(hand, outPoint) {
+  if (!readFist(hand)) return false;
+  _palm.copy(_wrist).lerp(_middle, 0.55);
+  let curled = 0;
+  for (const name of ['index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip']) {
+    if (jointPos(hand, name, _tip) && _tip.distanceTo(_palm) < 0.075) curled += 1;
+  }
+  if (curled < 3) return false;
+  outPoint.copy(_middle);
+  return true;
+}
+
 /** Wrist position, for swing speed and shield placement. */
 export function wrist(hand, out) {
   return jointPos(hand, 'wrist', out);
