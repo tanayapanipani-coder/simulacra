@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=0ab6170';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=0ab6170';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=0ab6170';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=87486b8';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=87486b8';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=87486b8';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=0ab6170';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=0ab6170';
-import { createCombat, INLINE_ARENA } from './combat.js?v=0ab6170';
-import { chooseMove } from './ai.js?v=0ab6170';
-import { createSim } from './sim.js?v=0ab6170';
-import { cleanCode, makeCode, openRoom } from './net.js?v=0ab6170';
-import { VERSION } from './version.js?v=0ab6170';
+} from './rules.js?v=87486b8';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=87486b8';
+import { createCombat, INLINE_ARENA } from './combat.js?v=87486b8';
+import { chooseMove } from './ai.js?v=87486b8';
+import { createSim } from './sim.js?v=87486b8';
+import { cleanCode, makeCode, openRoom } from './net.js?v=87486b8';
+import { VERSION } from './version.js?v=87486b8';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=0ab6170';
+} from './audio.js?v=87486b8';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -473,12 +473,16 @@ for (let i = 0; i < 2; i++) {
     controller.userData.connected = false;
   });
   controller.addEventListener('selectstart', () => {
+    // Any press in the headset (re)starts the sound: browsers keep audio
+    // suspended until the player has pressed something.
+    unlockAudio();
     controller.userData.selecting = true;
     if (!triggerHand) triggerHand = controller;
     input.primaryDown = true;
     input.primaryPressed = true;
   });
   controller.addEventListener('squeezestart', () => {
+    unlockAudio();
     controller.userData.squeezing = true;
   });
   controller.addEventListener('squeezeend', () => {
@@ -1183,7 +1187,7 @@ function seatInFront(xrFrame) {
   _fwd.y = 0;
   if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
   _fwd.normalize();
-  board.position.set(p.x, floorBased ? 0.96 : p.y - 0.64, p.z).addScaledVector(_fwd, 0.9);
+  board.position.set(p.x, floorBased ? 0.66 : p.y - 0.94, p.z).addScaledVector(_fwd, 0.9);
   faceBoardToward(p.x, p.z);
   needSeat = false;
 }
@@ -1236,7 +1240,7 @@ async function enterXR(kind) {
       placing = false;
       menu = false;
       // Table height above the real floor, or below the eyes without one.
-      board.position.set(0, floorBased ? 0.96 : -0.64, -0.85);
+      board.position.set(0, floorBased ? 0.66 : -0.94, -0.85);
       board.quaternion.identity();
       needSeat = true;
       simGreet();

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=0ab6170';
+import { clashBlurb } from './rules.js?v=87486b8';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,17 +7,21 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=0ab6170';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=0ab6170';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=0ab6170';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=0ab6170';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=0ab6170';
+} from './pieces.js?v=87486b8';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=87486b8';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=87486b8';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=87486b8';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=87486b8';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
 const TUNING = {
-  // A wave of ten swordsmen, staggered in over about two seconds.
-  meleeQuota: 10,
+  // Two waves of ten swordsmen, each staggered in over about two seconds;
+  // the second charges once the first is down to its last three. Archer
+  // fights come in two volleys of four.
+  meleeQuota: 20,
+  waveSize: 10,
+  archerWaves: 2,
   waveStagger: [0.12, 0.32],
   // At most this many press the attack at once; the rest hold a ring
   // around the player and wait their turn (all of them once few are left).
@@ -25,7 +29,7 @@ const TUNING = {
   meleeSpeed: 3.7,
   archerCount: 4,
   archerInterval: 3.05,
-  hearts: 5,
+  hearts: 8,
   enemyArrowSpeed: 8.2,
   playerArrowSpeed: 22,
   swordRange: 2.45,
@@ -382,7 +386,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       dying: 0,
       speed: TUNING.meleeSpeed * (0.9 + Math.random() * 0.2),
       // Where he waits his turn: an angle around the player and a distance.
-      slot: (spawned % 2 ? 1 : -1) * (0.15 + ((spawned - 1) >> 1) * 0.28) + (Math.random() - 0.5) * 0.1,
+      slot: (spawned % 2 ? 1 : -1) * (0.15 + (((spawned - 1) % TUNING.waveSize) >> 1) * 0.28) + (Math.random() - 0.5) * 0.1,
       ring: 4.3 + Math.random() * 1.3,
       vx: 0,
       vz: 0,
@@ -397,7 +401,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     });
   }
 
+  let archerWave = 0;
+  let archerNext = false;
   function spawnArchers() {
+    archerWave += 1;
     const n = TUNING.archerCount;
     for (let i = 0; i < n; i++) {
       const mesh = createSoldier('archer', paletteForEnemy(attackerSide));
@@ -525,8 +532,20 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
   // A swordsman's cut that reaches the player: blocked by the shield (he
   // staggers back) or it hurts.
+  const _cut = new THREE.Vector3();
   function landBlow(e, dist) {
-    if (shieldCovers(e.mesh.position.x, 1.25, e.mesh.position.z)) {
+    // A parry: your blade is in the path of his cut (or, on a screen, you
+    // are swinging as it lands). Steel rings on steel and he is thrown off.
+    _cut.set(e.mesh.position.x + (_dir.x / dist) * 0.8, 1.3, e.mesh.position.z + (_dir.z / dist) * 0.8);
+    const parried = usesSword() && sword.visible && (scripted ? hot > 0 : distPointSeg(_cut, _base, _tip) < 0.35);
+    if (parried) {
+      sparks.burst(_cut, 0xfff0c0, 14, 3.2);
+      playClang();
+      hooks.haptic?.(0.8);
+      e.windup = -0.5;
+      e.mesh.position.x -= (_dir.x / dist) * 0.3;
+      e.mesh.position.z -= (_dir.z / dist) * 0.3;
+    } else if (shieldCovers(e.mesh.position.x, 1.25, e.mesh.position.z)) {
       blockHit(e.mesh.position.x, 1.25, e.mesh.position.z);
       e.windup = -0.55;
       e.mesh.position.x -= (_dir.x / dist) * 0.35;
@@ -619,9 +638,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   function objectiveText() {
     if (mode === 'sword-melee') return `Cut down the charge  ${kills}/${quota}`;
     if (mode === 'bow-melee') return `Loose into the rush  ${kills}/${quota}`;
-    const aliveArchers = enemies.filter((e) => e.kind === 'archer' && e.alive).length;
-    if (mode === 'sword-deflect') return `Deflect arrows into the archers  ${TUNING.archerCount - aliveArchers}/${TUNING.archerCount}`;
-    return `Shoot the archers down  ${TUNING.archerCount - aliveArchers}/${TUNING.archerCount}`;
+    const total = TUNING.archerCount * TUNING.archerWaves;
+    if (mode === 'sword-deflect') return `Deflect arrows into the archers  ${kills}/${total}`;
+    return `Shoot the archers down  ${kills}/${total}`;
   }
 
   function checkEnd() {
@@ -629,7 +648,18 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (mode === 'sword-melee' || mode === 'bow-melee') {
       if (kills >= quota) return 'win';
     } else if (enemies.length && enemies.every((e) => e.kind !== 'archer' || !e.alive)) {
-      return 'win';
+      if (archerWave >= TUNING.archerWaves) return 'win';
+      // The next volley steps up.
+      if (!archerNext) {
+        archerNext = true;
+        setTimeout(() => {
+          archerNext = false;
+          if (active && phase === 'fight') {
+            spawnArchers();
+            playShout('cry');
+          }
+        }, 1200);
+      }
     }
     return null;
   }
@@ -661,6 +691,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     spawnT = 0;
     nextGap = 0;
     spawned = 0;
+    archerWave = 0;
+    archerNext = false;
     blocks = 0;
     shieldUp = 0;
     draw = 0;
@@ -1311,11 +1343,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (melee) {
       // The whole wave comes on together, each man a beat behind the last.
       spawnT += dt;
-      if (spawned < quota && spawnT > nextGap) {
+      // A new wave waits until the last one is down to its final three.
+      let swordsAlive = 0;
+      for (const o of enemies) if (o.alive && o.kind === 'sword') swordsAlive += 1;
+      const waveReady = spawned % TUNING.waveSize !== 0 || spawned === 0 || swordsAlive <= 3;
+      if (spawned < quota && spawnT > nextGap && waveReady) {
         spawnSwordsman();
         spawnT = 0;
         nextGap = TUNING.waveStagger[0] + Math.random() * (TUNING.waveStagger[1] - TUNING.waveStagger[0]);
-        if (spawned === 1 || spawned === 4 || spawned === 8) setTimeout(() => active && playShout('cry'), 120);
+        if ([1, 4, 8].includes(spawned % TUNING.waveSize)) setTimeout(() => active && playShout('cry'), 120);
       }
       updateShadows(dt);
     }

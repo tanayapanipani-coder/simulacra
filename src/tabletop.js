@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=0ab6170';
-import { createMiniature, metal, standard } from './pieces.js?v=0ab6170';
-import { steelTex, woodTex } from './textures.js?v=0ab6170';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=0ab6170';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=87486b8';
+import { createMiniature, metal, standard } from './pieces.js?v=87486b8';
+import { steelTex, woodTex } from './textures.js?v=87486b8';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=87486b8';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -584,7 +584,7 @@ function buildRoom() {
     new THREE.CylinderGeometry(0.55, 0.58, 0.06, 28),
     standard(0x3d2a1c, 0.62),
   );
-  table.position.set(0, 0.93, -0.85);
+  table.position.set(0, 0.63, -0.85);
   room.add(table);
   const pillarGeo = new THREE.CylinderGeometry(0.12, 0.14, 2.4, 8);
   const pillarMat = standard(0x2c2824, 0.8);

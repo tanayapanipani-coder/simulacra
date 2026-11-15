@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=0ab6170';
+import { clothTex, steelTex } from './textures.js?v=87486b8';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -232,8 +232,11 @@ export function dressMedieval(avatar) {
     boot.add(sole, upper, cap);
     place(boot, f, foot);
   }
-  // Arm armour: a steel pauldron on each shoulder, rerebrace and couter on
-  // the upper arm, and a vambrace with a leather strap on the forearm.
+  // Long sleeves in the bodice's velvet: a puffed shoulder, a fitted
+  // upper sleeve, and a forearm sleeve that flares into a bell cuff with a
+  // gold band at the wrist. Each piece rides on its arm bone.
+  const velvet = new THREE.MeshStandardMaterial({ color: 0x4a0c14, roughness: 0.85, map: clothTex(), side: THREE.DoubleSide });
+  const goldTrim = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.35 });
   for (const s of ['l', 'r']) {
     const upper = b[s + 'UpperArm'];
     const fore = b[s + 'Forearm'];
@@ -242,27 +245,16 @@ export function dressMedieval(avatar) {
     const sh = local(upper);
     const el = local(fore);
     const wr = hand ? local(hand) : el.clone().add(el.clone().sub(sh).multiplyScalar(0.9));
-    const pauldron = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), metal);
-    pauldron.scale.set(0.82, 0.68, 0.88);
-    const out = new THREE.Vector3(sh.x - neckP.x, 0, 0).normalize();
-    place(pauldron, sh.clone().add(new THREE.Vector3(out.x * 0.02, 0.025, 0)), upper);
-    const lame = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.035, 16, 1, true), metal);
-    place(lame, sh.clone().add(new THREE.Vector3(out.x * 0.02, -0.03, 0)), upper);
-    const rere = along((h) => new THREE.CylinderGeometry(0.052, 0.056, h, 14), metal, sh, el, 0.5, 0.42);
-    root.add(rere);
-    rere.updateMatrixWorld(true);
-    upper.attach(rere);
-    const couter = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), metal);
-    place(couter, el, fore);
-    const vamb = along((h) => new THREE.CylinderGeometry(0.047, 0.04, h, 14), metal, el, wr, 0.78, 0.12);
-    root.add(vamb);
-    vamb.updateMatrixWorld(true);
-    fore.attach(vamb);
-    for (const t of [0.3, 0.75]) {
-      const strap = along((h) => new THREE.CylinderGeometry(0.05, 0.05, h, 14, 1, true), hide, el, wr, 0.04, 0.12 + t * 0.78 - 0.02);
-      root.add(strap);
-      strap.updateMatrixWorld(true);
-      fore.attach(strap);
-    }
+    const attachTo = (bone, mesh) => {
+      root.add(mesh);
+      mesh.updateMatrixWorld(true);
+      bone.attach(mesh);
+    };
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.068, 16, 12), velvet);
+    puff.scale.set(1, 0.9, 1);
+    place(puff, sh.clone().lerp(el, 0.12), upper);
+    attachTo(upper, along((h) => new THREE.CylinderGeometry(0.056, 0.05, h, 16, 1, true), velvet, sh, el, 1.04, 0));
+    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.05, 0.07, h, 16, 1, true), velvet, el, wr, 0.98, -0.02));
+    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.071, 0.072, h, 16, 1, true), goldTrim, el, wr, 0.05, 0.93));
   }
 }
