@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { buildRanger, RANGER_PALETTES } from './ranger.js?v=8878fa3';
-import { createRig } from './rig.js?v=8878fa3';
+import { buildRanger, RANGER_PALETTES } from './ranger.js?v=2f79daa';
+import { createRig } from './rig.js?v=2f79daa';
 
 const MINI_SCALE = 0.045;
 
@@ -112,9 +112,28 @@ export function createBattleSword(hex = 0xf0d090) {
   blade.position.z = -0.46;
   const fuller = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.48), metal(0xfff4d2, 0x6a5018)));
   fuller.position.z = -0.44;
-  const tip = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.034, 0.12, 4), bladeMat));
-  tip.rotation.x = Math.PI / 2;
-  tip.position.z = -0.82;
+  // The point: the blade's own width and thickness tapering to a sharp tip,
+  // with a short shoulder so the edges flow into it. Drawn as a flat profile
+  // (x across the blade, y toward the point), extruded to the blade's
+  // thickness, then laid along -Z.
+  const pointShape = new THREE.Shape();
+  pointShape.moveTo(-0.0275, 0);
+  pointShape.lineTo(0.0275, 0);
+  pointShape.lineTo(0.022, 0.05);
+  pointShape.lineTo(0, 0.15);
+  pointShape.lineTo(-0.022, 0.05);
+  pointShape.closePath();
+  const pointGeo = new THREE.ExtrudeGeometry(pointShape, {
+    depth: 0.008,
+    bevelEnabled: true,
+    bevelThickness: 0.002,
+    bevelSize: 0.0015,
+    bevelSegments: 1,
+  });
+  pointGeo.translate(0, 0, -0.004);
+  pointGeo.rotateX(-Math.PI / 2);
+  const tip = add(group, new THREE.Mesh(pointGeo, bladeMat));
+  tip.position.z = -0.769;
   // Both cutting edges run along local ±X. A glowing strip marks each, so the
   // player can see which way the edge faces; combat brightens them while a
   // swing is leading with the edge.
@@ -166,6 +185,17 @@ export function createBattleBow(hex = 0xf0d090) {
   group.userData.grip = new THREE.Vector3(0, 0, -0.02);
   group.userData.nock = nock;
   group.userData.restZ = 0.08;
+  // A gloved drawing hand that sits on the string while it is pulled back.
+  const glove = new THREE.Group();
+  const leather = standard(0x5a3a24, 0.7);
+  add(glove, new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.085, 0.06), leather)).position.set(0.03, -0.02, 0.03);
+  for (let i = 0; i < 3; i++) {
+    const finger = add(glove, new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.02, 0.05), leather));
+    finger.position.set(-0.004, 0.022 - i * 0.022, 0.0);
+  }
+  glove.visible = false;
+  group.add(glove);
+  group.userData.glove = glove;
   setBowString(group, new THREE.Vector3(0, 0, 0.08));
   return group;
 }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=8878fa3';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=8878fa3';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=8878fa3';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=2f79daa';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=2f79daa';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=2f79daa';
 import {
   advanceTurn,
   createGame,
@@ -9,9 +9,10 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=8878fa3';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=8878fa3';
-import { createCombat, INLINE_ARENA } from './combat.js?v=8878fa3';
+} from './rules.js?v=2f79daa';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=2f79daa';
+import { createCombat, INLINE_ARENA } from './combat.js?v=2f79daa';
+import { chooseMove } from './ai.js?v=2f79daa';
 import {
   isMuted,
   playDefeat,
@@ -21,7 +22,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=8878fa3';
+} from './audio.js?v=2f79daa';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -53,6 +54,14 @@ const btnVr = $('btn-vr');
 const btnPlay = $('btn-play');
 const btnAgain = $('btn-again');
 const btnSound = $('btn-sound');
+const btnOpponent = $('btn-opponent');
+// You play Gold; the computer plays Violet unless switched to two players.
+const COMPUTER_SIDE = 1;
+let vsComputer = true;
+let aiTimer = 0;
+function computersTurn() {
+  return vsComputer && game.phase === 'play' && game.turn === COMPUTER_SIDE;
+}
 const btnYield = $('btn-yield');
 const btnMove = $('btn-move');
 const btnArMini = $('btn-ar-mini');
@@ -210,10 +219,12 @@ for (let i = 0; i < 2; i++) {
     controller.userData.connected = false;
   });
   controller.addEventListener('selectstart', () => {
+    controller.userData.selecting = true;
     input.primaryDown = true;
     input.primaryPressed = true;
   });
   controller.addEventListener('selectend', () => {
+    controller.userData.selecting = false;
     input.primaryDown = false;
     input.primaryReleased = true;
   });
@@ -270,6 +281,12 @@ const combat = createCombat({
     rightHand: () => findHand('right'),
     leftHand: () => findHand('left'),
     rightGrip: () => grips[controllers.indexOf(findHand('right'))] || null,
+    // Only a real left controller (not the right one standing in for it).
+    leftGrip: () => {
+      const left = controllers.find((c) => c.userData.connected && c.userData.handedness === 'left' && !c.userData.inputSource?.hand);
+      return left ? grips[controllers.indexOf(left)] : null;
+    },
+    rightSelecting: () => !!findHand('right')?.userData.selecting,
     lock: (on) => crosshair.classList.toggle('locked', on),
     trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
@@ -427,7 +444,7 @@ function updateHUD() {
   const falling = game.phase === 'over' && fallEpoch !== -1;
   turnEl.textContent = game.phase === 'over'
     ? (game.draw ? 'Stalemate' : falling ? 'The monarch falls…' : `${SIDE_NAME[game.winner]} wins!`)
-    : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]} to move`;
+    : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]}${vsComputer && game.turn === COMPUTER_SIDE ? ' (computer)' : ''} to move`;
   lastMoveEl.textContent = lastMove;
   lastMoveEl.classList.toggle('hidden', !lastMove || menu);
   const lead = game.phase === 'over' ? game.winner : game.turn;
@@ -437,6 +454,7 @@ function updateHUD() {
   topbar.classList.toggle('violet', lead === 1);
   const who = SIDE_NAME[game.turn];
   if (placing) hintEl.textContent = 'Point at a table, then tap to place the court.';
+  else if (computersTurn()) hintEl.textContent = `${who} (computer) is choosing a move…`;
   else if (game.phase === 'over') hintEl.textContent = game.draw ? 'Neither side can move.' : `${SIDE_NAME[game.winner]} has taken the monarch.`;
   else if (!game.selected) {
     hintEl.textContent = xrKind === 'ar'
@@ -481,6 +499,29 @@ function settle(info) {
   tabletop.refresh(game);
   updateHUD();
   if (game.phase === 'over') showGameOver();
+  scheduleComputer();
+}
+
+// The computer's turn: think briefly, show the move it has picked (its
+// piece is selected with the green and red squares, like yours), then play.
+function scheduleComputer() {
+  clearTimeout(aiTimer);
+  if (!computersTurn()) return;
+  const token = epoch;
+  aiTimer = setTimeout(() => {
+    if (token !== epoch || !computersTurn()) return;
+    const action = chooseMove(game);
+    if (!action) return;
+    game.selected = { r: action.from.r, c: action.from.c };
+    playTick();
+    tabletop.refresh(game);
+    updateHUD();
+    aiTimer = setTimeout(() => {
+      if (token !== epoch || !computersTurn()) return;
+      if (action.attack) doAttack(action.to.r, action.to.c);
+      else doMove(action.to.r, action.to.c);
+    }, 750);
+  }, 650);
 }
 
 // Squares are named like chess: files a–e from Gold's left, ranks 1–5 from
@@ -503,8 +544,11 @@ function doMove(r, c) {
   settle(advanceTurn(game));
 }
 
-function finishCombat(win) {
-  const { from, to } = pending || {};
+function finishCombat(result) {
+  const { from, to, defending } = pending || {};
+  // When you are defending, the clash is fought from your side: your win
+  // means the attacker loses.
+  const win = defending ? !result : result;
   const attacker = from && game.board[from.r][from.c];
   const defender = to && game.board[to.r][to.c];
   if (attacker) {
@@ -548,16 +592,22 @@ function doAttack(r, c) {
     return;
   }
   const token = ++epoch;
-  pending = { from: { r: from.r, c: from.c }, to: { r, c } };
+  const defending = vsComputer && attacker.side === COMPUTER_SIDE;
+  pending = { from: { r: from.r, c: from.c }, to: { r, c }, defending };
   game.selected = null;
   game.phase = 'combat';
   tabletop.refresh(game);
   updateHUD();
-  combat.start({
-    attackerType: attacker.type,
-    defenderType: defender.type,
-    attackerSide: attacker.side,
-  }).then((result) => {
+  if (defending) {
+    lastMove = `${describe(attacker)} attacks your ${TYPE_NAME[defender.type]} on ${squareName(r, c)} — defend it!`;
+    toast(`Defend your ${TYPE_NAME[defender.type]}!`);
+  }
+  // You always fight with your own piece's weapon: as the attacker, or, when
+  // the computer attacks, as the defender against the attacker's army.
+  combat.start(defending
+    ? { attackerType: defender.type, defenderType: attacker.type, attackerSide: defender.side }
+    : { attackerType: attacker.type, defenderType: defender.type, attackerSide: attacker.side },
+  ).then((result) => {
     if (token !== epoch || result === 'abort') return;
     finishCombat(result === true);
   });
@@ -574,10 +624,14 @@ function onMonarchFallen() {
 function handlePick(data) {
   if (menu || placing) return;
   if (game.phase === 'over') {
-    if (data?.action === 'again') restart();
+    if (data?.action === 'again') pressAgain();
     return;
   }
   if (game.phase !== 'play') return;
+  if (computersTurn()) {
+    toast(`${SIDE_NAME[COMPUTER_SIDE]} (computer) is moving…`);
+    return;
+  }
   if (!data || data.action) {
     game.selected = null;
     tabletop.refresh(game);
@@ -770,6 +824,7 @@ function onSessionEnd() {
 
 function restart() {
   releaseHeld(false);
+  clearTimeout(aiTimer);
   epoch += 1;
   combat.abort();
   game = createGame();
@@ -832,6 +887,39 @@ function updateHitTest(frame) {
   if (!pose) return;
   reticle.visible = true;
   reticle.matrix.fromArray(pose.transform.matrix);
+}
+
+// Play again: the button dips, then the court resets.
+let againPressed = false;
+function pressAgain() {
+  if (againPressed) return;
+  againPressed = true;
+  tabletop.again.userData.pressT = performance.now() / 1000;
+  playTick();
+  setTimeout(() => {
+    againPressed = false;
+    if (game.phase === 'over') restart();
+  }, 180);
+}
+
+const _againPos = new THREE.Vector3();
+// With hand tracking, poke the button with a fingertip or pinch on it.
+function pressAgainWithHands() {
+  const button = tabletop.again;
+  if (!button.parent?.visible) return;
+  button.getWorldPosition(_againPos);
+  for (const hand of hands) {
+    const tip = hand.joints?.['index-finger-tip'];
+    if (tip?.visible && tip.getWorldPosition(_indexTip).distanceTo(_againPos) < 0.045) {
+      pressAgain();
+      return;
+    }
+    const pinch = pinchPoint(hand);
+    if (pinch && pinch.distance < 0.02 && pinch.point.distanceTo(_againPos) < 0.07) {
+      pressAgain();
+      return;
+    }
+  }
 }
 
 function pinchPoint(hand) {
@@ -922,7 +1010,8 @@ function updateHands() {
   // sword or drawing the bow.
   const showHands = renderer.xr.isPresenting;
   for (let i = 0; i < handModels.length; i++) handModels[i].visible = showHands;
-  if (!showHands || combatView || game.phase !== 'play' || menu || placing) {
+  if (showHands && !combatView && game.phase === 'over') pressAgainWithHands();
+  if (!showHands || combatView || game.phase !== 'play' || menu || placing || computersTurn()) {
     if (heldPiece) releaseHeld(false);
     return;
   }
@@ -974,7 +1063,7 @@ function frame(t, xrFrame) {
   mouseMag = 0;
   dragSpeed = 0;
 
-  tabletop.update(dt);
+  tabletop.update(dt, fadeSphere.position);
   updateHands();
   if (combat.isActive()) combat.update(dt, input);
 
@@ -1080,6 +1169,14 @@ btnMove.addEventListener('click', () => beginPlacement());
 btnYield.addEventListener('click', () => {
   if (game.phase === 'combat') combat.force(false);
 });
+btnOpponent.addEventListener('click', () => {
+  vsComputer = !vsComputer;
+  btnOpponent.textContent = vsComputer ? 'Vs computer' : '2 players';
+  toast(vsComputer ? `${SIDE_NAME[COMPUTER_SIDE]} is played by the computer.` : 'Two players: take turns on this device.');
+  updateHUD();
+  scheduleComputer();
+});
+
 btnSound.addEventListener('click', () => {
   unlockAudio();
   toggleMute();

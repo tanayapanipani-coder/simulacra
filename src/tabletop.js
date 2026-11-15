@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=8878fa3';
-import { createMiniature, metal, standard } from './pieces.js?v=8878fa3';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=8878fa3';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=2f79daa';
+import { createMiniature, metal, standard } from './pieces.js?v=2f79daa';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=2f79daa';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -158,22 +158,33 @@ export function createTabletop(scene, sfx = {}) {
   let shownTurn = null;
   const sideLabels = [goldLabel, violetLabel];
 
+  // Game-over panel: a plaque with the result and a Play again button under
+  // it. It floats over the middle of the board and turns to face the player
+  // every frame (see update).
   const endPanel = new THREE.Group();
-  endPanel.position.set(0, 0.2, 0.02);
-  endPanel.rotation.x = -0.85;
+  endPanel.position.set(0, 0.2, 0);
   endPanel.visible = false;
-  const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.16), makePanelMaterial('The monarch falls', 'Play again'));
-  plaque.position.y = 0.02;
+  const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.16), makePanelMaterial('The monarch falls', ''));
+  plaque.position.y = 0.06;
   const again = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.045, 0.012),
+    new THREE.BoxGeometry(0.18, 0.05, 0.014),
     metal(0xf0d48a, 0x5a4010),
   );
-  again.position.set(0, -0.055, 0.01);
+  again.position.set(0, -0.06, 0.01);
   again.userData.action = 'again';
-  const againLabel = makeTextSprite('PLAY AGAIN', '#2a2114', [0.14, 0.03]);
-  againLabel.position.set(0, -0.055, 0.02);
+  // The label is printed on the button's front face, so it stays centred on
+  // the button from any angle.
+  const againLabel = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.17, 0.045),
+    new THREE.MeshBasicMaterial({
+      map: paintText('PLAY AGAIN', { width: 512, height: 128, color: '#2a2114', font: '700 64px Cinzel, Palatino, Georgia, serif' }),
+      transparent: true,
+    }),
+  );
+  againLabel.position.set(0, 0, 0.0075);
   againLabel.raycast = () => {};
-  endPanel.add(plaque, again, againLabel);
+  again.add(againLabel);
+  endPanel.add(plaque, again);
   board.add(endPanel);
 
   const pieceShadowTex = shadowTexture();
@@ -388,7 +399,20 @@ export function createTabletop(scene, sfx = {}) {
     pickables.push(top);
   }
 
-  function update(dt) {
+  const _viewer = new THREE.Vector3();
+  /**
+   * @param {number} dt
+   * @param {THREE.Vector3} [viewerWorld] the player's head, so the game-over
+   *   panel can face them
+   */
+  function update(dt, viewerWorld) {
+    if (endPanel.visible && viewerWorld) {
+      board.updateWorldMatrix(true, false);
+      endPanel.lookAt(_viewer.copy(viewerWorld));
+      // Press feedback on the button.
+      const press = again.userData.pressT ? Math.max(0, 1 - (performance.now() / 1000 - again.userData.pressT) / 0.2) : 0;
+      again.position.z = 0.01 - press * 0.006;
+    }
     clock.t += dt;
     turnPulse = Math.max(0, turnPulse - dt * 1.6);
     // Pop the turn label when the move changes hands, then keep it breathing.
