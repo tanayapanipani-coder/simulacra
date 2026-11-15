@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=94e3e33';
+import { clashBlurb } from './rules.js?v=1eff359';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=94e3e33';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=94e3e33';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=94e3e33';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=94e3e33';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=94e3e33';
+} from './pieces.js?v=1eff359';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=1eff359';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=1eff359';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=1eff359';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=1eff359';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -212,6 +212,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   // (weapons posed from tracked hand joints every frame).
   let gripMode = 'screen';
   let stringHeld = false;
+  // Which controller is holding the bow. The other one draws and looses.
+  let bowSide = 'right';
   let drawPeak = 0;
   let releaseWait = 0;
   const _peakNock = new THREE.Vector3();
@@ -417,6 +419,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     e.dying = 0.001;
     kills += 1;
     sparks.burst(point || e.mesh.position.clone().setY(1.2), 0xffe1b0, 10, 3.5);
+    // Cutting down a swordsman means beating his blade: steel rings on steel.
+    if (usesSword() && e.kind === 'sword') playClang();
     playHit();
     hooks.haptic?.(0.7);
     // Browsers refuse vibration until the page has been tapped.
@@ -916,26 +920,53 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     stringMat.emissiveIntensity = stringHeld ? 1.6 : nearString ? 0.9 : 0;
   }
 
-  // Two controllers, same as the headset build: the bow stays in the right
-  // hand. The left grip catches the string and draws it; letting that grip
-  // go is what looses the arrow. The right grip never fires.
+  function controllerSide(which) {
+    const grip = which === 'right' ? hooks.rightGrip?.() : hooks.leftGrip?.();
+    const ray = which === 'right' ? hooks.rightHand?.() : hooks.leftHand?.();
+    const pull = !!(ray?.userData.squeezing);
+    return { grip, ray, pull };
+  }
+
+  // Either hand can hold the bow. The other hand's grip draws the string,
+  // and letting that grip go looses the arrow. Letting go of the bow hand
+  // does not fire. The choice sticks for the whole draw.
   function poseFromControllers(dt) {
-    const bowGrip = hooks.rightGrip?.();
-    const bowRay = hooks.rightHand?.();
-    if (!bowGrip || !bowRay) return;
-    bowGrip.getWorldPosition(_gripPos);
+    const right = controllerSide('right');
+    const left = controllerSide('left');
+    const ready = (side) => side.grip && side.ray;
+    if (!ready(right) && !ready(left)) return;
+
+    if (!stringHeld) {
+      if (right.pull && !left.pull && ready(right)) bowSide = 'right';
+      else if (left.pull && !right.pull && ready(left)) bowSide = 'left';
+      else if (right.pull && left.pull && ready(right) && ready(left)) {
+        const held = bowSide === 'left' ? left : right;
+        if (ready(held)) {
+          held.grip.getWorldPosition(_gripPos);
+          bow.position.copy(_gripPos);
+          bow.updateMatrixWorld(true);
+          bow.localToWorld(_nockW.set(0, 0, bow.userData.restZ));
+          right.grip.getWorldPosition(_gripPos);
+          left.grip.getWorldPosition(_pullW);
+          // The hand nearer the string is drawing. The other keeps the bow.
+          bowSide = _gripPos.distanceTo(_nockW) < _pullW.distanceTo(_nockW) ? 'left' : 'right';
+        }
+      }
+    }
+
+    const bowHand = bowSide === 'left' ? left : right;
+    const stringHand = bowSide === 'left' ? right : left;
+    if (!ready(bowHand)) return;
+    bowHand.grip.getWorldPosition(_gripPos);
     bow.position.copy(_gripPos);
     bow.visible = true;
+    if (stringHand.grip) stringHand.grip.getWorldPosition(_pullW);
 
-    const stringGrip = hooks.leftGrip?.();
-    const pulling = !!(hooks.leftHand?.()?.userData.squeezing);
-    if (stringGrip) stringGrip.getWorldPosition(_pullW);
-
-    // At rest the bow follows the right controller. While the string is
-    // held it lies on the line between the hands, so the arrow flies from
-    // the string hand out through the bow.
-    bowRay.getWorldQuaternion(_q2);
-    const handsAim = stringHeld && stringGrip;
+    // At rest the bow follows the hand holding it. While the string is held
+    // it lies on the line between the hands, so the arrow flies from the
+    // string hand out through the bow.
+    bowHand.ray.getWorldQuaternion(_q2);
+    const handsAim = stringHeld && stringHand.grip;
     if (handsAim) _fwdW.subVectors(_gripPos, _pullW);
     else _fwdW.copy(_negZ).applyQuaternion(_q2);
     if (_fwdW.lengthSq() < 1e-6) _fwdW.set(0, 0, -1);
@@ -953,7 +984,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     bow.quaternion.setFromRotationMatrix(_basis);
     bow.updateMatrixWorld(true);
 
-    if (stringGrip) pullString(_pullW, pulling, 0.5, dt);
+    if (stringHand.grip) pullString(_pullW, stringHand.pull, 0.5, dt);
     else if (stringHeld) pullString(_pullW, false, 0.5, dt);
     glowString();
   }
@@ -1297,7 +1328,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
           arrow.owner = e;
           e.cooldown = TUNING.archerInterval * (0.85 + Math.random() * 0.3);
           e.sinceShot = 0;
-          playArrow();
+          // Quieter than your own bow: it is across the field.
+          playArrow(0.55);
         }
       }
     }
@@ -1363,6 +1395,11 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       if (arrow.alive && !arrow.fromPlayer && !arrow.reflected && arrow.age > 0.12 && shieldStops(arrow)) {
         arrow.alive = false;
         blockHit(arrow.mesh.position.x, arrow.mesh.position.y, arrow.mesh.position.z);
+      }
+      // An enemy arrow coming at you whistles as it closes in.
+      if (arrow.alive && !arrow.fromPlayer && !arrow.reflected && !arrow.whistled && arrow.mesh.position.distanceTo(_chest) < 5) {
+        arrow.whistled = true;
+        playArrowIncoming();
       }
       if (arrow.alive && !arrow.fromPlayer && !arrow.reflected && arrow.age > 0.12) {
         if (arrow.mesh.position.distanceTo(_chest) < 0.38) {

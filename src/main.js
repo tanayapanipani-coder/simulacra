@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=94e3e33';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=94e3e33';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=94e3e33';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=1eff359';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=1eff359';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=1eff359';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=94e3e33';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=94e3e33';
-import { createCombat, INLINE_ARENA } from './combat.js?v=94e3e33';
-import { chooseMove } from './ai.js?v=94e3e33';
-import { createSim } from './sim.js?v=94e3e33';
-import { cleanCode, makeCode, openRoom } from './net.js?v=94e3e33';
-import { VERSION } from './version.js?v=94e3e33';
+} from './rules.js?v=1eff359';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=1eff359';
+import { createCombat, INLINE_ARENA } from './combat.js?v=1eff359';
+import { chooseMove } from './ai.js?v=1eff359';
+import { createSim } from './sim.js?v=1eff359';
+import { cleanCode, makeCode, openRoom } from './net.js?v=1eff359';
+import { VERSION } from './version.js?v=1eff359';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=94e3e33';
+} from './audio.js?v=1eff359';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -910,6 +910,10 @@ function onMonarchFallen() {
 }
 
 function handlePick(data) {
+  if (data?.action === 'exit') {
+    exitXR();
+    return;
+  }
   if (menu || placing) return;
   if (game.phase === 'over') {
     if (data?.action === 'again') pressAgain();
@@ -970,7 +974,42 @@ function findData(object) {
   return null;
 }
 
+// An Exit button beside the board in AR and VR: point at it and pull the trigger, or pinch.
+const exitPlaque = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 192;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#8f1f1f';
+  g.beginPath();
+  g.roundRect(4, 4, 504, 184, 40);
+  g.fill();
+  g.lineWidth = 8;
+  g.strokeStyle = '#f0d48a';
+  g.stroke();
+  g.fillStyle = '#fff4dc';
+  g.font = '700 96px Cinzel, Palatino, Georgia, serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('EXIT', 256, 100);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.05), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }));
+  // On the player's left, just off the board, tilted up toward them.
+  mesh.position.set(-0.31, 0.05, 0.16);
+  mesh.rotation.set(-0.9, 0.35, 0);
+  mesh.userData.action = 'exit';
+  mesh.visible = false;
+  board.add(mesh);
+  return mesh;
+})();
+function exitXR() {
+  const session = renderer.xr.getSession();
+  if (session) session.end().catch(() => {});
+}
+
 function pickWithRay() {
+  if (exitPlaque.visible && raycaster.intersectObject(exitPlaque, false).length) return { action: 'exit' };
   if (game.phase === 'over') {
     const hits = raycaster.intersectObjects(pickables, true);
     for (const hit of hits) {
@@ -1294,7 +1333,7 @@ function pinchPoint(hand) {
 function nearestOwnPiece(point) {
   let best = null;
   let bestD = 0.05;
-  for (const mesh of tabletop.pickables) {
+  for (const mesh of tabletop.figures) {
     if (!mesh.userData?.id || mesh.userData.slay) continue;
     if (mesh.userData.side !== game.turn) continue;
     mesh.getWorldPosition(_piecePos);
@@ -1437,6 +1476,7 @@ function frame(t, xrFrame) {
     if (laser) laser.visible = renderer.xr.isPresenting && game.phase !== 'combat';
   }
   tabletop.turnSprite.visible = renderer.xr.isPresenting && !combatView;
+  exitPlaque.visible = renderer.xr.isPresenting && !combatView && !placing;
 
   updateHitTest(xrFrame);
   if (renderer.xr.isPresenting && xrKind === 'vr') seatInFront(xrFrame);
