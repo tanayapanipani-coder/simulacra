@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=cf5e2b5';
+import { clashBlurb } from './rules.js?v=17c8dff';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=cf5e2b5';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=cf5e2b5';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=cf5e2b5';
-import { createWarZone } from './war.js?v=cf5e2b5';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=cf5e2b5';
+} from './pieces.js?v=17c8dff';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=17c8dff';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=17c8dff';
+import { createWarZone } from './war.js?v=17c8dff';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=17c8dff';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -157,6 +157,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   let vulnerable = false;
   let spawnT = 0;
   let spawned = 0;
+  let blocks = 0;
   let draw = 0;
   let reload = 0;
   let swingU = -1;
@@ -224,6 +225,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     sword.removeFromParent();
     bow.removeFromParent();
     shield.removeFromParent();
+    shield.scale.setScalar(1);
     sword.visible = false;
     bow.visible = false;
     shield.visible = false;
@@ -283,6 +285,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         weapon.scale.setScalar(1);
         weapon.position.set(0.2, -0.3, -0.5);
         swordPose(weapon.quaternion, SWORD_UP, 0.18);
+        // Shield low on the left; raised in front while blocking.
+        camera.add(shield);
+        shield.visible = true;
+        shield.scale.setScalar(0.85);
       } else {
         weapon.scale.setScalar(0.55);
         weapon.position.set(0.1, -0.13, -0.45);
@@ -386,6 +392,62 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (navigator.vibrate && navigator.userActivation?.isActive) navigator.vibrate(18);
   }
 
+  // ------------------------------------------------------------ shield --
+  // The shield is impenetrable: any strike or arrow it covers is stopped.
+  // With controllers or hands it covers what it is held toward; on a flat
+  // screen, raising it (right mouse button or Q) covers everything in front.
+  const _shieldP = new THREE.Vector3();
+  const _toFoe = new THREE.Vector3();
+  const _toShield = new THREE.Vector3();
+  let shieldUp = 0;
+
+  function shieldReady() {
+    return usesSword() && shield.parent && shield.visible;
+  }
+
+  function shieldPosLocal(out) {
+    shield.getWorldPosition(out);
+    return group.worldToLocal(out);
+  }
+
+  // Is the shield between the player and a threat at (x, y, z)?
+  function shieldCovers(x, y, z) {
+    if (!shieldReady()) return false;
+    _toFoe.set(x - _player.x, 0, z - _player.z);
+    if (scripted) {
+      // Flat screen: a raised shield guards the front, ±55 degrees.
+      if (shieldUp < 0.6) return false;
+      const len = _toFoe.length() || 1;
+      return (_look.x * _toFoe.x + _look.z * _toFoe.z) / len > 0.57;
+    }
+    shieldPosLocal(_shieldP);
+    _toShield.set(_shieldP.x - _player.x, 0, _shieldP.z - _player.z);
+    const reach = _toShield.length();
+    if (reach < 0.12 || reach > 0.95) return false;
+    // Held out toward the threat: within 40 degrees of its direction.
+    return _toShield.dot(_toFoe) / (reach * (_toFoe.length() || 1)) > 0.77;
+  }
+
+  // Does an incoming arrow strike the shield this frame?
+  function shieldStops(arrow) {
+    if (!shieldReady()) return false;
+    if (scripted) {
+      return shieldUp >= 0.6 && arrow.mesh.position.distanceTo(_chest) < 1.1
+        && shieldCovers(arrow.mesh.position.x, arrow.mesh.position.y, arrow.mesh.position.z);
+    }
+    shieldPosLocal(_shieldP);
+    const from = arrow.prev || arrow.mesh.position;
+    return distPointSeg(_shieldP, from, arrow.mesh.position) < 0.36;
+  }
+
+  function blockHit(x, y, z) {
+    shieldPosLocal(_shieldP);
+    sparks.burst(_shieldP.lengthSq() > 0 ? _shieldP : _local.set(x, y, z), 0xfff0c0, 12, 3);
+    playDeflect();
+    hooks.haptic?.(0.7);
+    blocks += 1;
+  }
+
   function damagePlayer() {
     if (!vulnerable || hurtFlash > 0) return;
     hearts -= 1;
@@ -461,6 +523,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     vulnerable = false;
     spawnT = 0;
     spawned = 0;
+    blocks = 0;
+    shieldUp = 0;
     draw = 0;
     reload = 0;
     swingU = -1;
@@ -544,6 +608,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       const mix = (i) => a[i] + (b[i] - a[i]) * t;
       swordPose(weapon.quaternion, mix(0), mix(1));
       weapon.position.set(mix(2), mix(3), -0.5);
+
+      // Raise the shield across the front while blocking (right mouse button
+      // or Q); it drops back to the lower left when released.
+      shieldUp += ((input.block ? 1 : 0) - shieldUp) * (1 - Math.exp(-14 * dt));
+      const u = shieldUp;
+      shield.position.set(-0.3 + 0.2 * u, -0.36 + 0.24 * u, -0.52 + 0.08 * u);
+      shield.rotation.set(-0.6 * (1 - u), 0.55 * (1 - u) + 0.08, 0.15 * (1 - u));
     }
 
     if (gripMode === 'hand') poseFromHands(dt);
@@ -1018,13 +1089,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {
-      // The first swordsman charges alone; the rest keep coming after him,
-      // one by one, closer together as the fight goes on (2.6 s, then 2.4 s
-      // shrinking to 1.5 s), at most three on the field, and straight away
-      // whenever the field is empty.
+      // The first swordsman charges; the second sets off a second behind him
+      // so he joins the attack straight after, and the rest keep coming
+      // (1.8 s shrinking to 1.2 s), at most three on the field, and straight
+      // away whenever the field is empty.
       spawnT += dt;
       const alive = enemies.filter((e) => e.alive && e.kind === 'sword').length;
-      const gap = spawned <= 1 ? 2.6 : Math.max(1.5, 2.4 - (spawned - 2) * 0.2);
+      const gap = spawned <= 1 ? 1.0 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
       if (spawned < quota && alive < 3 && (spawnT > gap || (alive === 0 && spawnT > 0.5))) {
         spawnSwordsman();
         spawnT = 0;
@@ -1063,8 +1134,16 @@ export function createCombat({ scene, camera, renderer, hooks }) {
           e.windup += dt;
           rig?.drive(dt, { action: 'strike', t: e.windup, variant: e.swing, look: _camPos });
           if (e.windup > 0.62) {
-            damagePlayer();
-            e.windup = -0.28;
+            if (shieldCovers(e.mesh.position.x, 1.25, e.mesh.position.z)) {
+              // Blocked: the blow rings off the shield and he staggers back.
+              blockHit(e.mesh.position.x, 1.25, e.mesh.position.z);
+              e.windup = -0.55;
+              e.mesh.position.x -= (_dir.x / dist) * 0.35;
+              e.mesh.position.z -= (_dir.z / dist) * 0.35;
+            } else {
+              damagePlayer();
+              e.windup = -0.28;
+            }
             e.swing += 1;
           }
         }
@@ -1169,6 +1248,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         }
       }
 
+      if (arrow.alive && !arrow.fromPlayer && !arrow.reflected && arrow.age > 0.12 && shieldStops(arrow)) {
+        arrow.alive = false;
+        blockHit(arrow.mesh.position.x, arrow.mesh.position.y, arrow.mesh.position.z);
+      }
       if (arrow.alive && !arrow.fromPlayer && !arrow.reflected && arrow.age > 0.12) {
         if (arrow.mesh.position.distanceTo(_chest) < 0.38) {
           arrow.alive = false;

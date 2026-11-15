@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=cf5e2b5';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=cf5e2b5';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=cf5e2b5';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=17c8dff';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=17c8dff';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=17c8dff';
 import {
   advanceTurn,
   createGame,
@@ -9,11 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=cf5e2b5';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=cf5e2b5';
-import { createCombat, INLINE_ARENA } from './combat.js?v=cf5e2b5';
-import { chooseMove } from './ai.js?v=cf5e2b5';
-import { cleanCode, makeCode, openRoom } from './net.js?v=cf5e2b5';
+} from './rules.js?v=17c8dff';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=17c8dff';
+import { createCombat, INLINE_ARENA } from './combat.js?v=17c8dff';
+import { chooseMove } from './ai.js?v=17c8dff';
+import { cleanCode, makeCode, openRoom } from './net.js?v=17c8dff';
 import {
   isMuted,
   playDefeat,
@@ -23,7 +23,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=cf5e2b5';
+} from './audio.js?v=17c8dff';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -343,6 +343,7 @@ const input = {
   primaryPressed: false,
   primaryReleased: false,
   slash: false,
+  block: false,
 };
 let ptr = null;
 let mouseMag = 0;
@@ -1298,6 +1299,13 @@ function onResize() {
 window.addEventListener('resize', onResize);
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 
+// Right mouse button raises the shield in a sword clash.
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  if (event.button === 2 && game.phase === 'combat') input.block = true;
+});
+window.addEventListener('pointerup', (event) => {
+  if (event.button === 2) input.block = false;
+});
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
   ptr = { x: event.clientX, y: event.clientY, id: event.pointerId, dragged: false };
@@ -1364,8 +1372,10 @@ window.addEventListener('keydown', (event) => {
   keys[event.code] = true;
   if (event.repeat) return;
   if ((event.code === 'Space' || event.code === 'KeyF') && combatView) input.slash = true;
+  if (event.code === 'KeyQ' && combatView) input.block = true;
 });
 window.addEventListener('keyup', (event) => {
+  if (event.code === 'KeyQ') input.block = false;
   keys[event.code] = false;
 });
 
