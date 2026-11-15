@@ -5,8 +5,8 @@
 // then travel device to device. The player who creates the room plays Gold,
 // the one who joins plays Violet.
 
-const PEERJS_LOCAL = './vendor/peerjs.min.js?v=504a01f';
-const PEERJS_CDN = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js?v=504a01f';
+const PEERJS_LOCAL = './vendor/peerjs.min.js?v=7a596fa';
+const PEERJS_CDN = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js?v=7a596fa';
 const ID_PREFIX = 'crownfall-v1-';
 // No 0/O, 1/I/L, so codes are easy to read aloud and type in a headset.
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';

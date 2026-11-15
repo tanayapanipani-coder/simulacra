@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { playBoom } from './audio.js?v=504a01f';
+import { playBoom } from './audio.js?v=7a596fa';
 
 // A battlefield that surrounds the duels.
 //

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=504a01f';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=504a01f';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=504a01f';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=7a596fa';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=7a596fa';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=7a596fa';
 import {
   advanceTurn,
   createGame,
@@ -9,11 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=504a01f';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=504a01f';
-import { createCombat, INLINE_ARENA } from './combat.js?v=504a01f';
-import { chooseMove } from './ai.js?v=504a01f';
-import { cleanCode, makeCode, openRoom } from './net.js?v=504a01f';
+} from './rules.js?v=7a596fa';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=7a596fa';
+import { createCombat, INLINE_ARENA } from './combat.js?v=7a596fa';
+import { chooseMove } from './ai.js?v=7a596fa';
+import { cleanCode, makeCode, openRoom } from './net.js?v=7a596fa';
 import {
   isMuted,
   playDefeat,
@@ -23,7 +23,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=504a01f';
+} from './audio.js?v=7a596fa';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -56,6 +56,8 @@ const btnPlay = $('btn-play');
 const btnAgain = $('btn-again');
 const btnSound = $('btn-sound');
 const btnOpponent = $('btn-opponent');
+const btnLeave = $('btn-leave');
+const btnResign = $('btn-resign');
 // You play Gold; the computer plays Violet unless switched to two players.
 const COMPUTER_SIDE = 1;
 let vsComputer = true;
@@ -75,6 +77,8 @@ let mySide = null;
 let opponentHere = false;
 let applyingRemote = false;
 let remoteFight = null;
+let hostDealt = false;
+let opponentQuit = false;
 
 function snapshot() {
   return {
@@ -127,7 +131,16 @@ function remote(fn, after) {
 
 function onNetMessage(msg) {
   if (msg.t === 'state') {
+    remoteFight = null;
     applySnapshot(msg.state);
+    return;
+  }
+  if (msg.t === 'leave') {
+    opponentHere = false;
+    remoteFight = null;
+    opponentQuit = true;
+    toast(`${SIDE_NAME[1 - mySide]} left the game. Tap Leave online to play the computer.`);
+    updateHUD();
     return;
   }
   if (msg.t !== 'action') return;
@@ -165,6 +178,11 @@ function onNetMessage(msg) {
       game.selected = msg.from;
       doAttack(msg.to.r, msg.to.c);
     }, msg.after);
+  } else if (msg.kind === 'resign') {
+    remoteFight = null;
+    applySnapshot(msg.after);
+    toast(`${SIDE_NAME[1 - mySide]} resigned — you win!`);
+    playSfx('victory');
   } else if (msg.kind === 'restart') {
     remoteFight = null;
     remote(() => restart(), msg.after);
@@ -176,9 +194,15 @@ function onNetStatus(state, detail) {
     setOnlineMsg('Waiting for the other player to join…');
   } else if (state === 'connected') {
     opponentHere = true;
+    opponentQuit = false;
     if (mySide === 0) {
-      // The host deals a fresh board and tells the guest.
-      restart();
+      // First time in: the host deals a fresh board. If the other player is
+      // rejoining after a drop, the game carries on: they get the board as
+      // it stands.
+      if (!hostDealt) {
+        hostDealt = true;
+        restart();
+      }
       online.send({ t: 'state', state: snapshot() });
     }
     startOnlineGame();
@@ -187,7 +211,8 @@ function onNetStatus(state, detail) {
   } else if (state === 'disconnected') {
     opponentHere = false;
     remoteFight = null;
-    toast('The other player left. They can rejoin with the same code.');
+    // A deliberate Leave has already been announced.
+    if (!opponentQuit) toast('The other player dropped out. They can rejoin with the same code.');
     updateHUD();
   } else if (state === 'error') {
     setOnlineMsg(detail || 'Connection problem.');
@@ -255,6 +280,12 @@ const tabletop = createTabletop(scene, {
   onSlide: () => playSfx('swipe'),
   onLand: (_piece, kind) => playSfx(kind),
   onFall: () => onMonarchFallen(),
+  // Who each side is, for the floating turn label in AR/VR.
+  sideTag: (side) => (online
+    ? (side === mySide ? ' (you)' : ' (opponent)')
+    : vsComputer && side === COMPUTER_SIDE ? ' (computer)' : ''),
+  // The 3D result panel is for AR/VR; the flat screen uses the card.
+  show3DEnd: () => renderer.xr.isPresenting,
 });
 const { board, diorama, room, pickables } = tabletop;
 
@@ -293,6 +324,7 @@ const _scale = new THREE.Vector3();
 
 let game = createGame();
 let menu = true;
+let floorBased = false;
 let placing = false;
 let xrKind = null;
 let epoch = 0;
@@ -428,6 +460,7 @@ const combat = createCombat({
     },
     rightSelecting: () => !!findHand('right')?.userData.selecting,
     lock: (on) => crosshair.classList.toggle('locked', on),
+    floorBased: () => floorBased && renderer.xr.isPresenting,
     isAR: () => xrKind === 'ar' && renderer.xr.isPresenting,
     trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
@@ -607,6 +640,8 @@ function updateHUD() {
   flashTurn();
   btnSound.textContent = isMuted() ? 'Sound off' : 'Sound on';
   btnOpponent.classList.toggle('hidden', !!online);
+  btnLeave.classList.toggle('hidden', !online);
+  btnResign.classList.toggle('hidden', !online || game.phase !== 'play');
   updateNetStatus();
 }
 
@@ -623,6 +658,13 @@ function flashTurn() {
 }
 
 function showGameOver() {
+  // In AR/VR the 3D panel over the board shows the result; the card is for
+  // the flat screen.
+  if (renderer.xr.isPresenting) {
+    hideGameOver();
+    updateHUD();
+    return;
+  }
   gameoverEl.classList.toggle('gold', !game.draw && game.winner === 0);
   gameoverEl.classList.toggle('violet', !game.draw && game.winner === 1);
   goTitle.textContent = game.draw ? 'The court is locked' : `${SIDE_NAME[game.winner]} wins!`;
@@ -921,7 +963,6 @@ async function enterXR(kind) {
   const current = renderer.xr.getSession();
   if (current) await current.end();
   renderer.xr.enabled = true;
-  renderer.xr.setReferenceSpaceType(kind === 'vr' ? 'local-floor' : 'local');
   const init = kind === 'ar'
     ? {
       requiredFeatures: ['hit-test'],
@@ -931,15 +972,22 @@ async function enterXR(kind) {
     : { optionalFeatures: ['local-floor', 'hand-tracking'] };
   try {
     const session = await navigator.xr.requestSession(mode, init);
+    // Use the headset's own floor when it offers one, so the fights stand
+    // on the real floor whatever the player's height or posture; fall back
+    // to a 1.6 m eye height otherwise.
+    floorBased = await session.requestReferenceSpace('local-floor').then(() => true, () => false);
+    renderer.xr.setReferenceSpaceType(floorBased ? 'local-floor' : 'local');
     xrKind = kind;
     hitTestSource = null;
     hitTestRequested = false;
     session.addEventListener('end', onSessionEnd);
     await renderer.xr.setSession(session);
+    hideGameOver();
     if (kind === 'vr') {
       placing = false;
       menu = false;
-      board.position.set(0, 0.96, -0.85);
+      // Table height above the real floor, or below the eyes without one.
+      board.position.set(0, floorBased ? 0.96 : -0.64, -0.85);
       board.quaternion.identity();
     } else {
       beginPlacement();
@@ -956,7 +1004,9 @@ async function enterXR(kind) {
 
 function onSessionEnd() {
   releaseHeld(false);
+  floorBased = false;
   const wasFighting = combatView;
+  if (game.phase === 'over' && fallEpoch === -1) setTimeout(() => game.phase === 'over' && showGameOver(), 0);
   xrKind = null;
   placing = false;
   hitTestSource = null;
@@ -1247,7 +1297,13 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     input.primaryDown = true;
     input.primaryPressed = true;
     if (event.pointerType === 'mouse' && document.pointerLockElement !== renderer.domElement) {
-      renderer.domElement.requestPointerLock();
+      // Some browsers and embedded views refuse pointer lock; play on
+      // without it rather than raising an error.
+      try {
+        renderer.domElement.requestPointerLock()?.catch?.(() => {});
+      } catch {
+        /* pointer lock unavailable */
+      }
     }
   }
 });
@@ -1350,6 +1406,7 @@ function startOnlineGame() {
   menu = false;
   vsComputer = false;
   controls.enabled = true;
+  tabletop.refresh(game);
   updateHUD();
 }
 
@@ -1392,7 +1449,45 @@ $('btn-online').addEventListener('click', () => {
   setOnlineMsg('');
   showOnlinePanel(true);
 });
-$('btn-online-back').addEventListener('click', () => showOnlinePanel(false));
+// Back before anyone has joined closes the room, so local play works again.
+$('btn-online-back').addEventListener('click', () => {
+  if (online && !opponentHere) leaveOnline(false);
+  showOnlinePanel(false);
+});
+
+function leaveOnline(tellOpponent = true) {
+  if (online && tellOpponent && opponentHere) online.send({ t: 'leave' });
+  online?.close();
+  online = null;
+  mySide = null;
+  opponentHere = false;
+  remoteFight = null;
+  hostDealt = false;
+  vsComputer = true;
+  btnOpponent.textContent = 'Vs computer';
+  onlineShare.classList.add('hidden');
+  setOnlineMsg('');
+  restart();
+  toast('Back to playing on this device against the computer.');
+}
+
+$('btn-leave').addEventListener('click', () => {
+  if (!online) return;
+  if (window.confirm('Leave the online game?')) leaveOnline(true);
+});
+
+$('btn-resign').addEventListener('click', () => {
+  if (!online || game.phase !== 'play' || remoteFight) return;
+  if (!window.confirm('Resign this game?')) return;
+  game.phase = 'over';
+  game.winner = 1 - mySide;
+  game.draw = false;
+  game.selected = null;
+  lastMove = `${SIDE_NAME[mySide]} resigned`;
+  tabletop.refresh(game);
+  showGameOver();
+  sendAction('resign');
+});
 $('btn-host').addEventListener('click', () => goOnline('host', makeCode()));
 $('btn-join').addEventListener('click', () => {
   const code = cleanCode(joinInput.value);
@@ -1427,6 +1522,7 @@ $('btn-copy-link').addEventListener('click', async () => {
 btnOpponent.addEventListener('click', () => {
   vsComputer = !vsComputer;
   btnOpponent.textContent = vsComputer ? 'Vs computer' : '2 players';
+  tabletop.refresh(game);
   toast(vsComputer ? `${SIDE_NAME[COMPUTER_SIDE]} is played by the computer.` : 'Two players: take turns on this device.');
   updateHUD();
   scheduleComputer();
@@ -1434,9 +1530,21 @@ btnOpponent.addEventListener('click', () => {
 
 btnSound.addEventListener('click', () => {
   unlockAudio();
-  toggleMute();
+  const muted = toggleMute();
+  try {
+    localStorage.setItem('crownfall-muted', muted ? '1' : '0');
+  } catch {
+    /* storage unavailable: the setting just isn't remembered */
+  }
   updateHUD();
 });
+// Restore the last sound setting.
+try {
+  if (localStorage.getItem('crownfall-muted') === '1' && !isMuted()) toggleMute();
+} catch {
+  /* storage unavailable */
+}
+btnSound.textContent = isMuted() ? 'Sound off' : 'Sound on';
 
 async function detectXR() {
   if (!navigator.xr) {

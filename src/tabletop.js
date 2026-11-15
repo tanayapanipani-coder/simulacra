@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=504a01f';
-import { createMiniature, metal, standard } from './pieces.js?v=504a01f';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=504a01f';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=7a596fa';
+import { createMiniature, metal, standard } from './pieces.js?v=7a596fa';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=7a596fa';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -351,7 +351,7 @@ export function createTabletop(scene, sfx = {}) {
     const turnColor = lead == null ? '#e8e2d6' : SIDE_HEX[lead];
     const turnText = over
       ? (state.draw ? 'Stalemate' : `${SIDE_NAME[state.winner]} wins!`)
-      : `Move ${state.moveNo || 1} · ${SIDE_NAME[state.turn]} to move`;
+      : `Move ${state.moveNo || 1} · ${SIDE_NAME[state.turn]}${sfx.sideTag?.(state.turn) || ''} to move`;
     const key = `${state.phase}|${lead}|${state.moveNo || 1}`;
     if (key !== shownTurn) {
       shownTurn = key;
@@ -374,7 +374,8 @@ export function createTabletop(scene, sfx = {}) {
 
     // When a monarch falls, the end panel waits until it has hit the board.
     const falling = state.fallen && !meshes.get(state.fallen.id)?.userData.fall?.landed;
-    endPanel.visible = state.phase === 'over' && !falling;
+    endPanel.visible = state.phase === 'over' && !falling && (sfx.show3DEnd?.() ?? true);
+    endWanted = state.phase === 'over' && !falling;
     if (state.phase === 'over') {
       const title = state.draw ? 'The court is locked' : `${SIDE_NAME[state.winner]} wins!`;
       const sub = state.draw ? 'Neither side can move' : `${SIDE_NAME[state.winner]} takes the court`;
@@ -405,7 +406,14 @@ export function createTabletop(scene, sfx = {}) {
    * @param {THREE.Vector3} [viewerWorld] the player's head, so the game-over
    *   panel can face them
    */
+  let endWanted = false;
   function update(dt, viewerWorld) {
+    // Show or hide the 3D result panel as the player enters or leaves AR/VR.
+    const endShow = endWanted && (sfx.show3DEnd?.() ?? true);
+    if (endShow !== endPanel.visible) {
+      endPanel.visible = endShow;
+      rebuildPickables();
+    }
     if (endPanel.visible && viewerWorld) {
       board.updateWorldMatrix(true, false);
       endPanel.lookAt(_viewer.copy(viewerWorld));
@@ -454,7 +462,8 @@ export function createTabletop(scene, sfx = {}) {
           ang = Math.PI / 2 - Math.sin(b * Math.PI) * 0.12 * (1 - b);
           if (!f.landed) {
             f.landed = true;
-            endPanel.visible = true;
+            endWanted = true;
+            endPanel.visible = sfx.show3DEnd?.() ?? true;
             rebuildPickables();
             sfx.onFall?.({ id: data.id, type: data.type, side: data.side });
           }
