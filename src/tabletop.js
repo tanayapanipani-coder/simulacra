@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=487fd51';
-import { createMiniature, metal, standard } from './pieces.js?v=487fd51';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=487fd51';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=504a01f';
+import { createMiniature, metal, standard } from './pieces.js?v=504a01f';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=504a01f';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;

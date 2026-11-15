@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { buildRanger, RANGER_PALETTES } from './ranger.js?v=487fd51';
-import { createRig } from './rig.js?v=487fd51';
+import { buildRanger, RANGER_PALETTES } from './ranger.js?v=504a01f';
+import { createRig } from './rig.js?v=504a01f';
 
 const MINI_SCALE = 0.045;
 

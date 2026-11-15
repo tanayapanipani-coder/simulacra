@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=487fd51';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=487fd51';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=487fd51';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=504a01f';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=504a01f';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=504a01f';
 import {
   advanceTurn,
   createGame,
@@ -9,11 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=487fd51';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=487fd51';
-import { createCombat, INLINE_ARENA } from './combat.js?v=487fd51';
-import { chooseMove } from './ai.js?v=487fd51';
-import { cleanCode, makeCode, openRoom } from './net.js?v=487fd51';
+} from './rules.js?v=504a01f';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=504a01f';
+import { createCombat, INLINE_ARENA } from './combat.js?v=504a01f';
+import { chooseMove } from './ai.js?v=504a01f';
+import { cleanCode, makeCode, openRoom } from './net.js?v=504a01f';
 import {
   isMuted,
   playDefeat,
@@ -23,7 +23,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=487fd51';
+} from './audio.js?v=504a01f';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -38,7 +38,6 @@ const meter = $('meter');
 const meterBar = $('meter-bar');
 const toastEl = $('toast');
 const gameoverEl = $('gameover');
-const lastMoveEl = $('last-move');
 let turnShown = null;
 // What was just played, shown under the turn pill, and a running move count.
 let lastMove = '';
@@ -588,8 +587,6 @@ function updateHUD() {
   turnEl.textContent = game.phase === 'over'
     ? (game.draw ? 'Stalemate' : falling ? 'The monarch falls…' : `${SIDE_NAME[game.winner]} wins!`)
     : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]}${online ? (game.turn === mySide ? ' (you)' : ' (opponent)') : vsComputer && game.turn === COMPUTER_SIDE ? ' (computer)' : ''} to move`;
-  lastMoveEl.textContent = lastMove;
-  lastMoveEl.classList.toggle('hidden', !lastMove || menu);
   const lead = game.phase === 'over' ? game.winner : game.turn;
   turnEl.classList.toggle('gold', lead === 0);
   turnEl.classList.toggle('violet', lead === 1);
@@ -648,8 +645,9 @@ function settle(info) {
   scheduleComputer();
 }
 
-// The computer's turn: think briefly, show the move it has picked (its
-// piece is selected with the green and red squares, like yours), then play.
+// The computer's turn, played straight after yours: as soon as your piece
+// has landed it flashes the move it picked (its piece selected with the
+// green and red squares) and plays it.
 function scheduleComputer() {
   clearTimeout(aiTimer);
   if (!computersTurn()) return;
@@ -666,8 +664,8 @@ function scheduleComputer() {
       if (token !== epoch || !computersTurn()) return;
       if (action.attack) doAttack(action.to.r, action.to.c);
       else doMove(action.to.r, action.to.c);
-    }, 750);
-  }, 650);
+    }, 220);
+  }, 380);
 }
 
 // Squares are named like chess: files a–e from Gold's left, ranks 1–5 from
