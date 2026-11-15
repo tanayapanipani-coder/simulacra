@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=87779e0';
-import { createMiniature, metal, standard } from './pieces.js?v=87779e0';
-import { steelTex, woodTex } from './textures.js?v=87779e0';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=87779e0';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=acdcee8';
+import { createMiniature, metal, standard } from './pieces.js?v=acdcee8';
+import { steelTex, woodTex } from './textures.js?v=acdcee8';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=acdcee8';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -420,8 +420,6 @@ export function createTabletop(scene, sfx = {}) {
       rebuildPickables();
     }
     if (endPanel.visible && viewerWorld) {
-      board.updateWorldMatrix(true, false);
-      endPanel.lookAt(_viewer.copy(viewerWorld));
       // Press feedback on the button.
       const press = again.userData.pressT ? Math.max(0, 1 - (performance.now() / 1000 - again.userData.pressT) / 0.2) : 0;
       again.position.z = 0.01 - press * 0.006;
@@ -430,8 +428,9 @@ export function createTabletop(scene, sfx = {}) {
     turnPulse = Math.max(0, turnPulse - dt * 1.6);
     // Pop the turn label when the move changes hands, then keep it breathing.
     const beat = 1 + Math.sin((1 - turnPulse) * Math.PI) * 0.35 * (turnPulse > 0 ? 1 : 0);
-    const [bw, bh] = turnSprite.userData.base || [0.3, 0.075];
-    turnSprite.scale.set(bw * beat, bh * beat, 1);
+    const geom = turnSprite.geometry.parameters;
+    const [bw, bh] = turnSprite.userData.base || [geom.width, geom.height];
+    turnSprite.scale.set((bw / geom.width) * beat, (bh / geom.height) * beat, 1);
     turnSprite.material.opacity = 0.85 + 0.15 * Math.sin(clock.t * 3);
     for (const bar of turnBars) bar.material.opacity = Math.min(1, 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(clock.t * 4)) + turnPulse * 0.3);
     for (let side = 0; side < 2; side++) {

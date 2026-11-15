@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=87779e0';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=87779e0';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=87779e0';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=acdcee8';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=acdcee8';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=acdcee8';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=87779e0';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=87779e0';
-import { createCombat, INLINE_ARENA } from './combat.js?v=87779e0';
-import { chooseMove } from './ai.js?v=87779e0';
-import { createSim } from './sim.js?v=87779e0';
-import { cleanCode, makeCode, openRoom } from './net.js?v=87779e0';
-import { VERSION } from './version.js?v=87779e0';
+} from './rules.js?v=acdcee8';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=acdcee8';
+import { createCombat, INLINE_ARENA } from './combat.js?v=acdcee8';
+import { chooseMove } from './ai.js?v=acdcee8';
+import { createSim } from './sim.js?v=acdcee8';
+import { cleanCode, makeCode, openRoom } from './net.js?v=acdcee8';
+import { VERSION } from './version.js?v=acdcee8';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=87779e0';
+} from './audio.js?v=acdcee8';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -1047,7 +1047,7 @@ function placeExitPlaque() {
     exitPlaque.position.copy(_cam).addScaledVector(_exitFwd, 0.6).addScaledVector(left, 0.45);
     exitPlaque.position.y -= 0.42;
     exitPlaque.scale.setScalar(2);
-    exitPlaque.lookAt(_cam);
+    exitPlaque.rotation.set(-0.9, 0.35, 0);
   } else if (!fighting && exitPlaque.parent !== board) {
     board.add(exitPlaque);
     exitPlaque.position.copy(_exitHome.position);
@@ -1533,7 +1533,8 @@ function frame(t, xrFrame) {
   for (const controller of controllers) {
     const laser = controller.getObjectByName('laser');
     if (!laser) continue;
-    laser.visible = renderer.xr.isPresenting && game.phase !== 'combat';
+    const hand = controller.userData.handedness;
+    laser.visible = renderer.xr.isPresenting && game.phase !== 'combat' && (!clickHand || hand === clickHand);
     if (!laser.visible) continue;
     const line = laser.children[0];
     laser.updateWorldMatrix(true, false);

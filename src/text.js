@@ -39,11 +39,11 @@ export function paintText(text, {
 
 export function makeTextSprite(text, color, scale = [0.18, 0.045]) {
   const tex = paintText(text, { color, width: 1024, height: 256, font: '600 100px Cinzel, Palatino, Georgia, serif' });
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(scale[0], scale[1], 1);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+  const sprite = new THREE.Mesh(new THREE.PlaneGeometry(scale[0], scale[1]), mat);
   sprite.userData.label = text;
   sprite.userData.color = color;
+  sprite.userData.base = scale.slice();
   return sprite;
 }
 

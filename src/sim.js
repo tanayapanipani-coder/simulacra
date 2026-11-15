@@ -12,13 +12,14 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=87779e0';
-import { createAvatar } from '../webxr/avatar.js?v=87779e0';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=87779e0';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=87779e0';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=acdcee8';
+import { createAvatar } from '../webxr/avatar.js?v=acdcee8';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=acdcee8';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=acdcee8';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=87779e0';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=87779e0';
+import { TOP, squareLocal } from './tabletop.js?v=acdcee8';
+import { dressMedieval } from './medieval.js?v=acdcee8';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=acdcee8';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
@@ -89,7 +90,11 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   const assetBase = new URL('avatar/', document.baseURI).href;
   const avatar = createAvatar({ THREE, FBXLoader, scene, assetBase, lite: /OculusBrowser|Quest|Android|Mobile/i.test(navigator.userAgent) });
   let loaded = false;
-  avatar.load().then(() => { loaded = true; });
+  avatar.load().then(() => {
+    // Crownfall dresses her for the court: a velvet gown, cloak and circlet.
+    try { dressMedieval(avatar); } catch (e) { console.warn('medieval dress skipped', e); }
+    loaded = true;
+  });
   const pose = { x: 0, y: 0, z: 0, yaw: 0, speed01: 0, gesture: '', metres: 0 };
   const lookAt = new THREE.Vector3();
   const pointAt = new THREE.Vector3();
@@ -109,7 +114,7 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
     const g = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+    const sprite = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.14), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false }));
     sprite.scale.set(0.9, 0.14, 1);
     sprite.renderOrder = 20;
     sprite.visible = false;
