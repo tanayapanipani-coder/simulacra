@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=87486b8';
+import { clothTex, steelTex } from './textures.js?v=69eb987';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -232,10 +232,13 @@ export function dressMedieval(avatar) {
     boot.add(sole, upper, cap);
     place(boot, f, foot);
   }
-  // Long sleeves in the bodice's velvet: a puffed shoulder, a fitted
-  // upper sleeve, and a forearm sleeve that flares into a bell cuff with a
-  // gold band at the wrist. Each piece rides on its arm bone.
-  const velvet = new THREE.MeshStandardMaterial({ color: 0x4a0c14, roughness: 0.85, map: clothTex(), side: THREE.DoubleSide });
+  // Long sleeves: the top's own short sleeves carry on down to the wrist.
+  // Each sleeve starts just inside the end of the short sleeve, a touch
+  // narrower, in the same colour the top is dyed, so it reads as one
+  // garment; it ends in a narrow gold band at the wrist. Each piece rides
+  // on its arm bone.
+  const sleeve = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
+  sleeve.color.setRGB(0.2, 0.018, 0.03); // linear, as the dye renders the top
   const goldTrim = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.35 });
   for (const s of ['l', 'r']) {
     const upper = b[s + 'UpperArm'];
@@ -250,11 +253,10 @@ export function dressMedieval(avatar) {
       mesh.updateMatrixWorld(true);
       bone.attach(mesh);
     };
-    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.068, 16, 12), velvet);
-    puff.scale.set(1, 0.9, 1);
-    place(puff, sh.clone().lerp(el, 0.12), upper);
-    attachTo(upper, along((h) => new THREE.CylinderGeometry(0.056, 0.05, h, 16, 1, true), velvet, sh, el, 1.04, 0));
-    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.05, 0.07, h, 16, 1, true), velvet, el, wr, 0.98, -0.02));
-    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.071, 0.072, h, 16, 1, true), goldTrim, el, wr, 0.05, 0.93));
+    // Upper arm: from under the short sleeve's hem to just past the elbow.
+    attachTo(upper, along((h) => new THREE.CylinderGeometry(0.047, 0.043, h, 18, 1, true), sleeve, sh, el, 0.72, 0.3));
+    // Forearm: a slightly loose sleeve to the wrist.
+    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.043, 0.047, h, 18, 1, true), sleeve, el, wr, 0.97, -0.03));
+    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.049, 0.049, h, 18, 1, true), goldTrim, el, wr, 0.035, 0.93));
   }
 }
