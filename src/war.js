@@ -1,5 +1,22 @@
 import * as THREE from 'three';
-import { playBoom } from './audio.js?v=7a596fa';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=3592930';
+import { playBoom } from './audio.js?v=3592930';
+
+// Set pieces modelled in Blender (tools/blender/war_props.py): ruined walls,
+// a wrecked catapult, a burnt siege tower, an overturned cart, torn tents, a
+// palisade, craters and supplies, plus FIRE_* markers where fires burn.
+const WAR_PROPS_URL = 'models/war_props.glb';
+let propsPromise = null;
+function loadWarProps() {
+  if (!propsPromise) {
+    const url = new URL(WAR_PROPS_URL, document.baseURI).href;
+    propsPromise = new GLTFLoader().loadAsync(url).catch((err) => {
+      console.warn('War props did not load; the duel goes on without them.', err);
+      return null;
+    });
+  }
+  return propsPromise;
+}
 
 // A battlefield that surrounds the duels.
 //
@@ -324,6 +341,28 @@ export function createWarZone(group) {
     for (let i = 0; i < 26; i++) ember(at.x, 0.2, at.z, 3.2);
     playBoom(Math.min(1, 5 / Math.hypot(at.x, at.z)));
   }
+
+  // Blender set pieces: placed as modelled, with a fire at every FIRE_*
+  // marker (flames, smoke and embers; no extra lights, to stay light on a
+  // headset).
+  loadWarProps().then((gltf) => {
+    if (!gltf) return;
+    const props = gltf.scene;
+    props.name = 'war_props';
+    root.add(props);
+    for (const node of props.children) {
+      if (!node.name.startsWith('FIRE_')) continue;
+      const { x, y, z } = node.position;
+      const flames = [];
+      for (let k = 0; k < 4; k++) {
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.flame, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+        s.position.set(x + rand(-0.2, 0.2), y + 0.5, z + rand(-0.2, 0.2));
+        root.add(s);
+        flames.push({ s, phase: rand(0, 6), size: rand(0.8, 1.2) });
+      }
+      fires.push({ x, z, flames, smokeT: rand(0, 1) });
+    }
+  });
 
   // ------------------------------------------------------------ update --
   let time = 0;
