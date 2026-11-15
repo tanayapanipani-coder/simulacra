@@ -12,14 +12,14 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=acdcee8';
-import { createAvatar } from '../webxr/avatar.js?v=acdcee8';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=acdcee8';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=acdcee8';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=0ab6170';
+import { createAvatar } from '../webxr/avatar.js?v=0ab6170';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=0ab6170';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=0ab6170';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=acdcee8';
-import { dressMedieval } from './medieval.js?v=acdcee8';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=acdcee8';
+import { TOP, squareLocal } from './tabletop.js?v=0ab6170';
+import { dressMedieval } from './medieval.js?v=0ab6170';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=0ab6170';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';

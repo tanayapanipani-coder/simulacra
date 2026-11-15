@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=acdcee8';
+import { clashBlurb } from './rules.js?v=0ab6170';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=acdcee8';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=acdcee8';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=acdcee8';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=acdcee8';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=acdcee8';
+} from './pieces.js?v=0ab6170';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=0ab6170';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=0ab6170';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=0ab6170';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=0ab6170';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 

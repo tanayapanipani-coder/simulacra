@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=acdcee8';
+import { clothTex, steelTex } from './textures.js?v=0ab6170';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -104,6 +104,54 @@ function cloak(height) {
   return g;
 }
 
+const _Y = new THREE.Vector3(0, 1, 0);
+// A mesh built along +Y (centred), stretched from point a to b.
+function along(geoFn, mat, a, b, cover = 1, from = 0) {
+  const dir = b.clone().sub(a);
+  const len = dir.length();
+  const m = new THREE.Mesh(geoFn(len * cover), mat);
+  m.position.copy(a).addScaledVector(dir, from + cover / 2);
+  m.quaternion.setFromUnitVectors(_Y, dir.normalize());
+  return m;
+}
+
+// An ankle-length skirt from the waist, flaring, in soft folds, with a gold
+// band at the hem.
+function skirt(top, bottom) {
+  const g = new THREE.Group();
+  const len = top - bottom;
+  const velvet = new THREE.MeshStandardMaterial({ color: 0x4a0c14, roughness: 0.85, map: clothTex(), side: THREE.DoubleSide });
+  const geo = new THREE.CylinderGeometry(0.125, 0.34, len, 32, 6, true);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const k = (len / 2 - pos.getY(i)) / len;
+    const a = Math.atan2(pos.getX(i), pos.getZ(i));
+    const fold = 1 + Math.sin(a * 9) * 0.04 * k;
+    pos.setX(i, pos.getX(i) * fold);
+    pos.setZ(i, pos.getZ(i) * fold);
+  }
+  geo.computeVertexNormals();
+  const body = new THREE.Mesh(geo, velvet);
+  body.position.y = -len / 2;
+  g.add(body);
+  const gold = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.35 });
+  const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.345, 0.35, 0.035, 32, 1, true), gold);
+  hem.position.y = -len + 0.03;
+  g.add(hem);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.013, 6, 32), new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.7 }));
+  belt.rotation.x = Math.PI / 2;
+  g.add(belt);
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.01), gold);
+  buckle.position.set(0, 0, 0.135);
+  g.add(buckle);
+  // A waist is wider than it is deep.
+  g.scale.set(1, 1, 0.8);
+  return g;
+}
+
+const steel = () => new THREE.MeshStandardMaterial({ color: 0xa4a8b0, metalness: 0.8, roughness: 0.35, envMapIntensity: 1.4, map: steelTex() });
+const leather = () => new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.75, map: clothTex() });
+
 /**
  * Dress a loaded avatar (from webxr/avatar.js). Safe to call more than
  * once; does nothing if the model or its bones are not there.
@@ -149,4 +197,72 @@ export function dressMedieval(avatar) {
   place(c, headP.clone().add(new THREE.Vector3(0, 0.15, 0.0)), head);
   const k = cloak(height);
   place(k, neckP.clone().add(new THREE.Vector3(0, -0.02, -0.03)), neck);
+
+  const b = avatar.body.bones;
+  const metal = steel();
+  const hide = leather();
+  // An ankle-length skirt over the legs, belted at the waist.
+  if (b.hips && b.lFoot) {
+    const hipsP = local(b.hips);
+    const ankle = Math.min(local(b.lFoot).y, b.rFoot ? local(b.rFoot).y : 9);
+    const top = hipsP.y + 0.1;
+    place(skirt(top, ankle + 0.05), new THREE.Vector3(hipsP.x, top, hipsP.z), b.hips);
+  }
+  // Riding boots: a leather shaft up the calf and a foot with a toe cap.
+  for (const s of ['l', 'r']) {
+    const foot = b[s + 'Foot'];
+    const calf = b[s + 'Calf'];
+    if (!foot || !calf) continue;
+    const f = local(foot);
+    const knee = local(calf);
+    const shaft = along((h) => new THREE.CylinderGeometry(0.062, 0.056, h, 14), hide, new THREE.Vector3(f.x, Math.max(0.02, f.y - 0.04), f.z), knee, 0.72);
+    root.add(shaft);
+    shaft.updateMatrixWorld(true);
+    calf.attach(shaft);
+    const boot = new THREE.Group();
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.03, 0.25), new THREE.MeshStandardMaterial({ color: 0x1c120a, roughness: 0.9 }));
+    sole.position.set(0, -f.y + 0.015, 0.045);
+    const upper = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10), hide);
+    upper.scale.set(0.82, 0.75, 2.1);
+    upper.position.set(0, -f.y + 0.06, 0.05);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), metal);
+    cap.rotation.x = Math.PI / 2;
+    cap.scale.set(1, 1, 0.9);
+    cap.position.set(0, -f.y + 0.05, 0.15);
+    boot.add(sole, upper, cap);
+    place(boot, f, foot);
+  }
+  // Arm armour: a steel pauldron on each shoulder, rerebrace and couter on
+  // the upper arm, and a vambrace with a leather strap on the forearm.
+  for (const s of ['l', 'r']) {
+    const upper = b[s + 'UpperArm'];
+    const fore = b[s + 'Forearm'];
+    const hand = findBone(model, (n) => n.endsWith(`${s} hand`) || n.endsWith(s === 'l' ? 'lefthand' : 'righthand'));
+    if (!upper || !fore) continue;
+    const sh = local(upper);
+    const el = local(fore);
+    const wr = hand ? local(hand) : el.clone().add(el.clone().sub(sh).multiplyScalar(0.9));
+    const pauldron = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), metal);
+    pauldron.scale.set(0.82, 0.68, 0.88);
+    const out = new THREE.Vector3(sh.x - neckP.x, 0, 0).normalize();
+    place(pauldron, sh.clone().add(new THREE.Vector3(out.x * 0.02, 0.025, 0)), upper);
+    const lame = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.035, 16, 1, true), metal);
+    place(lame, sh.clone().add(new THREE.Vector3(out.x * 0.02, -0.03, 0)), upper);
+    const rere = along((h) => new THREE.CylinderGeometry(0.052, 0.056, h, 14), metal, sh, el, 0.5, 0.42);
+    root.add(rere);
+    rere.updateMatrixWorld(true);
+    upper.attach(rere);
+    const couter = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), metal);
+    place(couter, el, fore);
+    const vamb = along((h) => new THREE.CylinderGeometry(0.047, 0.04, h, 14), metal, el, wr, 0.78, 0.12);
+    root.add(vamb);
+    vamb.updateMatrixWorld(true);
+    fore.attach(vamb);
+    for (const t of [0.3, 0.75]) {
+      const strap = along((h) => new THREE.CylinderGeometry(0.05, 0.05, h, 14, 1, true), hide, el, wr, 0.04, 0.12 + t * 0.78 - 0.02);
+      root.add(strap);
+      strap.updateMatrixWorld(true);
+      fore.attach(strap);
+    }
+  }
 }
