@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FORE_LEN, SHIN_LEN, THIGH_LEN, UPPER_LEN } from './ranger.js?v=f6d2c2e';
+import { FORE_LEN, SHIN_LEN, THIGH_LEN, UPPER_LEN } from './ranger.js?v=1295735';
 
 // Procedural joint rig for the combat rangers.
 //

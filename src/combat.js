@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=f6d2c2e';
+import { clashBlurb } from './rules.js?v=1295735';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=f6d2c2e';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=f6d2c2e';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=f6d2c2e';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=f6d2c2e';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=f6d2c2e';
+} from './pieces.js?v=1295735';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=1295735';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=1295735';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=1295735';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=1295735';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -723,13 +723,57 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     hud();
   }
 
+  let banner = null;
+
+  function showBanner(text) {
+    hideBanner();
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = 'bold 168px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = text === 'You Won!' ? '#f3d27a' : '#e24b4b';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.7, 0.42),
+      new THREE.MeshBasicMaterial({ map, transparent: true, depthTest: false }),
+    );
+    mesh.renderOrder = 50;
+    scene.add(mesh);
+    banner = mesh;
+    placeBanner();
+  }
+
+  function placeBanner() {
+    if (!banner) return;
+    const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+    cam.getWorldPosition(banner.position);
+    cam.getWorldQuaternion(banner.quaternion);
+    banner.translateZ(-1.35);
+  }
+
+  function hideBanner() {
+    if (!banner) return;
+    scene.remove(banner);
+    banner.geometry.dispose();
+    banner.material.map?.dispose();
+    banner.material.dispose();
+    banner = null;
+  }
+
   function finish(win) {
     if (!active || phase === 'result') return;
     resultWin = win;
     phase = 'result';
     phaseT = 0;
     vulnerable = false;
-    hooks.caption?.(win ? 'The square is yours' : 'You are thrown back');
+    showBanner(win ? 'You Won!' : 'You Lost!');
+    hooks.caption?.('');
     if (win) playHit();
   }
 
@@ -746,6 +790,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     active = false;
     hooks.fade?.(0, '#000');
     hooks.caption?.('');
+    hideBanner();
     hooks.onView?.(false);
     hooks.hud?.(null);
   }
@@ -1266,7 +1311,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         e.mesh.userData.rig?.drive(dt, { action: 'die', t: e.dying });
         if (e.dying < 1.1) falling = true;
       }
-      if (phaseT > 1.15 && !falling) {
+      placeBanner();
+      if (phaseT > 2.4 && !falling) {
         const win = resultWin;
         teardown();
         resolveFn?.(win);
