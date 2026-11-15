@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=097ac9a';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=097ac9a';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=097ac9a';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=2eb7fa6';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=2eb7fa6';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=2eb7fa6';
 import {
   advanceTurn,
   createGame,
@@ -9,12 +9,12 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=097ac9a';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=097ac9a';
-import { createCombat, INLINE_ARENA } from './combat.js?v=097ac9a';
-import { chooseMove } from './ai.js?v=097ac9a';
-import { createSim } from './sim.js?v=097ac9a';
-import { cleanCode, makeCode, openRoom } from './net.js?v=097ac9a';
+} from './rules.js?v=2eb7fa6';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=2eb7fa6';
+import { createCombat, INLINE_ARENA } from './combat.js?v=2eb7fa6';
+import { chooseMove } from './ai.js?v=2eb7fa6';
+import { createSim } from './sim.js?v=2eb7fa6';
+import { cleanCode, makeCode, openRoom } from './net.js?v=2eb7fa6';
 import {
   isMuted,
   playDefeat,
@@ -24,7 +24,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=097ac9a';
+} from './audio.js?v=2eb7fa6';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -396,7 +396,8 @@ let menu = true;
 let floorBased = false;
 let placing = false;
 let xrKind = null;
-let seatWait = 0;
+let needSeat = false;
+const _seatQ = new THREE.Quaternion();
 let epoch = 0;
 let pending = null;
 let combatView = false;
@@ -1028,7 +1029,7 @@ function faceBoardToward(x, z) {
 // After the viewer's side changes (joining or leaving an online game).
 function reseat() {
   if (!renderer.xr.isPresenting) seatFlat();
-  else if (!placing && !combatView) seatAtTable();
+  else if (!placing && !combatView) needSeat = true;
 }
 
 // On screen the camera sits on the +Z side of the table.
@@ -1066,12 +1067,23 @@ function placeBoard() {
   simGreet();
 }
 
-// Point your row of the board at your head so the pieces you move stay on
-// your side of the table.
-function seatAtTable() {
-  const cam = renderer.xr.getCamera();
-  cam.getWorldPosition(_cam);
-  faceBoardToward(_cam.x, _cam.z);
+// Once, from the headset pose: table in front of the face, your pieces on the
+// near edge. Sim stays on the far edge.
+function seatInFront(xrFrame) {
+  if (!needSeat || !xrFrame) return;
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = ref && xrFrame.getViewerPose(ref);
+  if (!pose) return;
+  const p = pose.transform.position;
+  const o = pose.transform.orientation;
+  _seatQ.set(o.x, o.y, o.z, o.w);
+  _fwd.set(0, 0, -1).applyQuaternion(_seatQ);
+  _fwd.y = 0;
+  if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
+  _fwd.normalize();
+  board.position.set(p.x, floorBased ? 0.96 : p.y - 0.64, p.z).addScaledVector(_fwd, 0.9);
+  faceBoardToward(p.x, p.z);
+  needSeat = false;
 }
 
 function beginPlacement() {
@@ -1123,12 +1135,8 @@ async function enterXR(kind) {
       menu = false;
       // Table height above the real floor, or below the eyes without one.
       board.position.set(0, floorBased ? 0.96 : -0.64, -0.85);
-      // Until a head pose arrives, assume the player stands at the origin.
-      faceBoardToward(0, 0);
-      // The tracking origin is not always where the head is. Wait for a real
-      // pose, then turn Gold (the side you move) to the near edge.
-      seatWait = 2;
-      sim.resetPlace();
+      board.quaternion.identity();
+      needSeat = true;
       simGreet();
     } else {
       beginPlacement();
@@ -1427,13 +1435,7 @@ function frame(t, xrFrame) {
   tabletop.turnSprite.visible = renderer.xr.isPresenting && !combatView;
 
   updateHitTest(xrFrame);
-  if (seatWait > 0 && renderer.xr.isPresenting && !combatView) {
-    seatWait -= dt;
-    seatAtTable();
-    if (seatWait <= 0) sim.standStill();
-  } else if (!renderer.xr.isPresenting) {
-    sim.standStill();
-  }
+  if (renderer.xr.isPresenting && xrKind === 'vr') seatInFront(xrFrame);
   movePlayer(dt);
   if (input.primaryPressed || mouseMag > 34 || dragSpeed > 32) input.slash = true;
   mouseMag = 0;

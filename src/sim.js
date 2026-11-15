@@ -12,13 +12,13 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=097ac9a';
-import { createAvatar } from '../webxr/avatar.js?v=097ac9a';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=097ac9a';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=097ac9a';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=2eb7fa6';
+import { createAvatar } from '../webxr/avatar.js?v=2eb7fa6';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=2eb7fa6';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=2eb7fa6';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=097ac9a';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=097ac9a';
+import { TOP, squareLocal } from './tabletop.js?v=2eb7fa6';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=2eb7fa6';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
@@ -81,9 +81,6 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   const eyes = new THREE.Vector3();
   const spot = new THREE.Vector3();
   const centre = new THREE.Vector3();
-  const away = new THREE.Vector3();
-  const home = new THREE.Vector3();
-  let placed = false;
   let attendBoardFor = 0; // seconds she keeps looking at the square she is playing
   let nextGesture = '';
   let voiceLevel = 0;
@@ -147,32 +144,15 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
     nextGesture = 'point';
   }
 
-  // One spot on the far side of the table. Called when the table has settled.
-  function standStill() {
-    if (placed) return;
-    board.updateMatrixWorld(true);
-    centre.set(0, 0, 0);
-    board.localToWorld(centre);
-    getCamera().getWorldPosition(eyes);
-    away.set(centre.x - eyes.x, 0, centre.z - eyes.z);
-    if (away.lengthSq() < 1e-4) away.set(0, 0, -1);
-    away.normalize();
-    spot.copy(centre).addScaledVector(away, TOP / 2 + 0.55);
-    board.worldToLocal(home.copy(spot));
-    placed = true;
-  }
-
   function update(dt, { visible, floorY }) {
     avatar.root.visible = visible && loaded;
     sign.sprite.visible = false;
     if (!avatar.root.visible) return;
+    // Far edge of the board. The table is turned so this edge faces away from
+    // the user, and this spot does not change.
     board.updateMatrixWorld(true);
-    if (!placed) {
-      spot.set(0, 0, -(TOP / 2 + 0.55));
-      board.localToWorld(spot);
-    } else {
-      board.localToWorld(spot.copy(home));
-    }
+    spot.set(0, 0, -(TOP / 2 + 0.55));
+    board.localToWorld(spot);
     centre.set(0, 0, 0);
     board.localToWorld(centre);
     pose.x = spot.x;
@@ -605,8 +585,6 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   let retries = 0;
   return {
     update,
-    standStill,
-    resetPlace() { placed = false; },
     record,
     root: avatar.root,
     hasKey: () => { try { return !!storage.getItem(KEY_NAME); } catch (e) { return false; } },
