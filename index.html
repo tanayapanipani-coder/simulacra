@@ -41,7 +41,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Outfit:wght@380;500;640&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="src/style.css?v=2f79daa" />
+    <link rel="stylesheet" href="src/style.css?v=487fd51" />
   </head>
   <body>
     <div id="boot"><div><b>CROWNFALL</b><br>Loading…</div></div>
@@ -54,6 +54,7 @@
         <p id="turn" aria-live="polite">Gold's turn</p>
         <p id="last-move"></p>
         <p id="hint">Click one of your pieces.</p>
+        <p id="net-status" class="hidden"></p>
       </header>
 
       <section id="combat-hud" class="hidden">
@@ -85,8 +86,32 @@
           <button id="btn-ar" type="button">Enter AR</button>
           <button id="btn-vr" type="button">Enter VR</button>
           <button id="btn-play" type="button">Play here</button>
+          <button id="btn-online" type="button">Play online</button>
         </div>
         <p id="xr-note" class="note">On a phone, run <code>npm run dev:ar</code> and open the https address so the headset or browser can start AR.</p>
+      </section>
+
+      <section id="online" class="hidden">
+        <div class="card">
+          <p class="eyebrow">Play online</p>
+          <h2>Two players, two devices</h2>
+          <p class="note">Create a game and send the code or link to the other player. Whoever creates the game plays Gold; whoever joins plays Violet. Each of you moves only your own pieces.</p>
+          <div class="online-row">
+            <button id="btn-host" type="button" class="primary">Create game</button>
+          </div>
+          <div id="online-share" class="hidden">
+            <p class="code-label">Room code</p>
+            <p id="online-code" class="code"></p>
+            <button id="btn-copy-link" type="button">Copy invite link</button>
+          </div>
+          <p class="or">or join a game</p>
+          <div class="online-row">
+            <input id="join-code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="8" placeholder="Code" aria-label="Room code" />
+            <button id="btn-join" type="button">Join</button>
+          </div>
+          <p id="online-msg" class="note" aria-live="polite"></p>
+          <button id="btn-online-back" type="button">Back</button>
+        </div>
       </section>
 
       <section id="gameover" class="hidden">
@@ -108,6 +133,6 @@
         <button id="btn-move" type="button" class="hidden">Move board</button>
       </div>
     </div>
-    <script type="module" src="src/main.js?v=2f79daa"></script>
+    <script type="module" src="src/main.js?v=487fd51"></script>
   </body>
 </html>

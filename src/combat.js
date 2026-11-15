@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=2f79daa';
+import { clashBlurb } from './rules.js?v=487fd51';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,9 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=2f79daa';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=2f79daa';
-import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=2f79daa';
+} from './pieces.js?v=487fd51';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=487fd51';
+import { bowGrip, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=487fd51';
+import { createWarZone } from './war.js?v=487fd51';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=487fd51';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -110,7 +112,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   const group = new THREE.Group();
   group.visible = false;
   scene.add(group);
-  buildArena(group);
+  // The night arena's sky and ground are hidden in AR so the fight happens
+  // in the player's real room, which the war zone turns into a battlefield.
+  const arenaBackdrop = buildArena(group);
+  const war = createWarZone(group);
+  function applyArenaMode() {
+    const ar = !!hooks.isAR?.();
+    for (const obj of arenaBackdrop) obj.visible = !ar;
+    war.setAR(ar);
+  }
 
   const sword = createBattleSword(0xf0d090);
   const bow = createBattleBow(0xf0d090);
@@ -450,6 +460,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     haveHandPrev = false;
     presented = renderer.xr.isPresenting;
     group.visible = true;
+    war.reset();
+    applyArenaMode();
+    startWarAmbience();
     anchor();
     hooks.onView?.(true);
     attachWeapons();
@@ -470,6 +483,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   }
 
   function teardown() {
+    stopWarAmbience();
     setLock(null);
     autoDraw = false;
     mousePull = false;
@@ -819,8 +833,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       presented = nowPresenting;
       anchor();
       attachWeapons();
+      applyArenaMode();
     }
     phaseT += dt;
+    war.update(dt);
     sparks.update(dt);
     if (hurtFlash > 0) hurtFlash -= dt;
 
@@ -1131,6 +1147,7 @@ function buildArena(group) {
     new THREE.MeshBasicMaterial({ color: 0x140e0c, side: THREE.BackSide }),
   );
   group.add(sky);
+  const backdrop = [ground, ring, sky];
 
   const moon = new THREE.Mesh(
     new THREE.SphereGeometry(0.55, 16, 12),
@@ -1138,6 +1155,7 @@ function buildArena(group) {
   );
   moon.position.set(-5, 8.5, -9);
   group.add(moon);
+  backdrop.push(moon);
 
   const hemi = new THREE.HemisphereLight(0xffd2b0, 0x2a1a12, 0.85);
   group.add(hemi);
@@ -1174,6 +1192,7 @@ function buildArena(group) {
     rock.rotation.set(i, i * 0.4, 0);
     group.add(rock);
   }
+  return backdrop;
 }
 
 function createSparks(parent) {

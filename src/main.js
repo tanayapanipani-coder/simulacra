@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=2f79daa';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=2f79daa';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=2f79daa';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=487fd51';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=487fd51';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=487fd51';
 import {
   advanceTurn,
   createGame,
@@ -9,10 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=2f79daa';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=2f79daa';
-import { createCombat, INLINE_ARENA } from './combat.js?v=2f79daa';
-import { chooseMove } from './ai.js?v=2f79daa';
+} from './rules.js?v=487fd51';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=487fd51';
+import { createCombat, INLINE_ARENA } from './combat.js?v=487fd51';
+import { chooseMove } from './ai.js?v=487fd51';
+import { cleanCode, makeCode, openRoom } from './net.js?v=487fd51';
 import {
   isMuted,
   playDefeat,
@@ -22,10 +23,11 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=2f79daa';
+} from './audio.js?v=487fd51';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
+const netStatus = $('net-status');
 const topbar = $('topbar');
 const turnEl = $('turn');
 const hintEl = $('hint');
@@ -60,7 +62,146 @@ const COMPUTER_SIDE = 1;
 let vsComputer = true;
 let aiTimer = 0;
 function computersTurn() {
-  return vsComputer && game.phase === 'play' && game.turn === COMPUTER_SIDE;
+  return vsComputer && !online && game.phase === 'play' && game.turn === COMPUTER_SIDE;
+}
+
+// ---------------------------------------------------------------- online --
+// Two players on two devices: the room's creator plays Gold, the joiner
+// Violet. Each side only moves on its own turn; the other side's moves,
+// clash results and restarts arrive over the connection. Every action
+// carries the board as it stands afterwards, so the two devices can never
+// drift apart.
+let online = null;
+let mySide = null;
+let opponentHere = false;
+let applyingRemote = false;
+let remoteFight = null;
+
+function snapshot() {
+  return {
+    board: game.board.map((row) => row.map((p) => (p ? { id: p.id, type: p.type, side: p.side } : null))),
+    turn: game.turn,
+    phase: game.phase === 'combat' ? 'play' : game.phase,
+    winner: game.winner,
+    draw: game.draw,
+    moveNo: game.moveNo || 1,
+    fallen: game.fallen || null,
+    lastMove,
+  };
+}
+
+function sameAs(s) {
+  const a = snapshot();
+  return JSON.stringify([a.board, a.turn, a.phase, a.moveNo]) === JSON.stringify([s.board, s.turn, s.phase, s.moveNo]);
+}
+
+function applySnapshot(s) {
+  game.board = s.board.map((row) => row.map((p) => (p ? { ...p } : null)));
+  game.turn = s.turn;
+  game.phase = s.phase;
+  game.winner = s.winner;
+  game.draw = s.draw;
+  game.moveNo = s.moveNo;
+  game.fallen = s.fallen;
+  game.selected = null;
+  lastMove = s.lastMove || lastMove;
+  tabletop.refresh(game);
+  updateHUD();
+  if (game.phase === 'over') showGameOver();
+  else hideGameOver();
+}
+
+function sendAction(kind, extra = {}) {
+  if (!online || applyingRemote) return;
+  online.send({ t: 'action', kind, ...extra, after: snapshot() });
+}
+
+function remote(fn, after) {
+  applyingRemote = true;
+  try {
+    fn();
+  } finally {
+    applyingRemote = false;
+  }
+  if (after && !sameAs(after)) applySnapshot(after);
+}
+
+function onNetMessage(msg) {
+  if (msg.t === 'state') {
+    applySnapshot(msg.state);
+    return;
+  }
+  if (msg.t !== 'action') return;
+  // If the boards ever disagree about the piece being moved, skip the replay
+  // and take the sender's board as it stands after the action.
+  if ((msg.kind === 'move' || msg.kind === 'strike' || msg.kind === 'clash') && msg.after && !game.board[msg.from?.r]?.[msg.from?.c]) {
+    remoteFight = null;
+    applySnapshot(msg.after);
+    return;
+  }
+  if (msg.kind === 'move') {
+    remote(() => {
+      game.selected = msg.from;
+      doMove(msg.to.r, msg.to.c);
+    }, msg.after);
+  } else if (msg.kind === 'fighting') {
+    const attacker = game.board[msg.from.r]?.[msg.from.c];
+    const defender = game.board[msg.to.r]?.[msg.to.c];
+    remoteFight = msg;
+    if (attacker && defender) {
+      lastMove = `${describe(attacker)} attacks your ${TYPE_NAME[defender.type]} on ${squareName(msg.to.r, msg.to.c)} — clash in progress…`;
+    }
+    game.selected = null;
+    tabletop.refresh(game);
+    updateHUD();
+  } else if (msg.kind === 'clash') {
+    remoteFight = null;
+    remote(() => {
+      pending = { from: msg.from, to: msg.to, defending: false };
+      game.phase = 'combat';
+      finishCombat(!!msg.win);
+    }, msg.after);
+  } else if (msg.kind === 'strike') {
+    remote(() => {
+      game.selected = msg.from;
+      doAttack(msg.to.r, msg.to.c);
+    }, msg.after);
+  } else if (msg.kind === 'restart') {
+    remoteFight = null;
+    remote(() => restart(), msg.after);
+  }
+}
+
+function onNetStatus(state, detail) {
+  if (state === 'waiting') {
+    setOnlineMsg('Waiting for the other player to join…');
+  } else if (state === 'connected') {
+    opponentHere = true;
+    if (mySide === 0) {
+      // The host deals a fresh board and tells the guest.
+      restart();
+      online.send({ t: 'state', state: snapshot() });
+    }
+    startOnlineGame();
+    toast(`Connected — you are ${SIDE_NAME[mySide]}.`);
+    updateHUD();
+  } else if (state === 'disconnected') {
+    opponentHere = false;
+    remoteFight = null;
+    toast('The other player left. They can rejoin with the same code.');
+    updateHUD();
+  } else if (state === 'error') {
+    setOnlineMsg(detail || 'Connection problem.');
+    if (!opponentHere) toast(detail || 'Connection problem.');
+  }
+}
+
+function onlineBlock() {
+  if (!online) return null;
+  if (!opponentHere) return 'Waiting for the other player to join.';
+  if (remoteFight) return `${SIDE_NAME[1 - mySide]} is fighting a clash — wait for the result.`;
+  if (game.phase === 'play' && game.turn !== mySide) return `It is ${SIDE_NAME[game.turn]}'s move — waiting for your opponent.`;
+  return null;
 }
 const btnYield = $('btn-yield');
 const btnMove = $('btn-move');
@@ -288,6 +429,7 @@ const combat = createCombat({
     },
     rightSelecting: () => !!findHand('right')?.userData.selecting,
     lock: (on) => crosshair.classList.toggle('locked', on),
+    isAR: () => xrKind === 'ar' && renderer.xr.isPresenting,
     trackedHand: (which) => hands.find((h) => h.userData.inputSource?.handedness === which && h.userData.inputSource?.hand) || null,
   },
 });
@@ -375,7 +517,8 @@ function onCombatView(enter) {
     savedTarget.copy(controls.target);
     savedFov = camera.fov;
     controls.enabled = false;
-    scene.fog = new THREE.Fog(0x120e0c, 7, 21);
+    // Night fog belongs to the virtual arena; in AR it would tint the real room.
+    scene.fog = xrKind === 'ar' && renderer.xr.isPresenting ? null : new THREE.Fog(0x120e0c, 7, 21);
     if (!renderer.xr.isPresenting) {
       camera.fov = 72;
       camera.updateProjectionMatrix();
@@ -444,7 +587,7 @@ function updateHUD() {
   const falling = game.phase === 'over' && fallEpoch !== -1;
   turnEl.textContent = game.phase === 'over'
     ? (game.draw ? 'Stalemate' : falling ? 'The monarch falls…' : `${SIDE_NAME[game.winner]} wins!`)
-    : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]}${vsComputer && game.turn === COMPUTER_SIDE ? ' (computer)' : ''} to move`;
+    : `Move ${game.moveNo || 1} · ${SIDE_NAME[game.turn]}${online ? (game.turn === mySide ? ' (you)' : ' (opponent)') : vsComputer && game.turn === COMPUTER_SIDE ? ' (computer)' : ''} to move`;
   lastMoveEl.textContent = lastMove;
   lastMoveEl.classList.toggle('hidden', !lastMove || menu);
   const lead = game.phase === 'over' ? game.winner : game.turn;
@@ -455,6 +598,7 @@ function updateHUD() {
   const who = SIDE_NAME[game.turn];
   if (placing) hintEl.textContent = 'Point at a table, then tap to place the court.';
   else if (computersTurn()) hintEl.textContent = `${who} (computer) is choosing a move…`;
+  else if (online && onlineBlock() && game.phase === 'play') hintEl.textContent = onlineBlock();
   else if (game.phase === 'over') hintEl.textContent = game.draw ? 'Neither side can move.' : `${SIDE_NAME[game.winner]} has taken the monarch.`;
   else if (!game.selected) {
     hintEl.textContent = xrKind === 'ar'
@@ -465,6 +609,8 @@ function updateHUD() {
   } else hintEl.textContent = `${who}: green moves, red strikes. The monarch only steps.`;
   flashTurn();
   btnSound.textContent = isMuted() ? 'Sound off' : 'Sound on';
+  btnOpponent.classList.toggle('hidden', !!online);
+  updateNetStatus();
 }
 
 // The turn pill at the top flashes whenever the move passes to the other
@@ -542,6 +688,7 @@ function doMove(r, c) {
   lastMove = `${describe(piece)} ${squareName(from.r, from.c)} → ${squareName(r, c)}`;
   game.moveNo = (game.moveNo || 1) + 1;
   settle(advanceTurn(game));
+  sendAction('move', { from: { r: from.r, c: from.c }, to: { r, c } });
 }
 
 function finishCombat(result) {
@@ -570,6 +717,7 @@ function finishCombat(result) {
   pending = null;
   settle(advanceTurn(game));
   game.takeover = null;
+  if (from && to) sendAction('clash', { from, to, win });
 }
 
 function doAttack(r, c) {
@@ -589,8 +737,10 @@ function doAttack(r, c) {
     playSfx('ping');
     tabletop.refresh(game);
     updateHUD();
+    sendAction('strike', { from: { r: from.r, c: from.c }, to: { r, c } });
     return;
   }
+  if (online && !applyingRemote) online.send({ t: 'action', kind: 'fighting', from: { r: from.r, c: from.c }, to: { r, c } });
   const token = ++epoch;
   const defending = vsComputer && attacker.side === COMPUTER_SIDE;
   pending = { from: { r: from.r, c: from.c }, to: { r, c }, defending };
@@ -630,6 +780,11 @@ function handlePick(data) {
   if (game.phase !== 'play') return;
   if (computersTurn()) {
     toast(`${SIDE_NAME[COMPUTER_SIDE]} (computer) is moving…`);
+    return;
+  }
+  const blocked = onlineBlock();
+  if (blocked) {
+    toast(blocked);
     return;
   }
   if (!data || data.action) {
@@ -839,6 +994,7 @@ function restart() {
   updateHUD();
   playSfx('start');
   toast('The court is set.');
+  sendAction('restart');
 }
 
 function movePlayer(dt) {
@@ -1011,7 +1167,7 @@ function updateHands() {
   const showHands = renderer.xr.isPresenting;
   for (let i = 0; i < handModels.length; i++) handModels[i].visible = showHands;
   if (showHands && !combatView && game.phase === 'over') pressAgainWithHands();
-  if (!showHands || combatView || game.phase !== 'play' || menu || placing || computersTurn()) {
+  if (!showHands || combatView || game.phase !== 'play' || menu || placing || computersTurn() || onlineBlock()) {
     if (heldPiece) releaseHeld(false);
     return;
   }
@@ -1169,6 +1325,107 @@ btnMove.addEventListener('click', () => beginPlacement());
 btnYield.addEventListener('click', () => {
   if (game.phase === 'combat') combat.force(false);
 });
+// ------------------------------------------------------- online panel --
+const onlinePanel = $('online');
+const onlineShare = $('online-share');
+const onlineCodeEl = $('online-code');
+const onlineMsg = $('online-msg');
+const joinInput = $('join-code');
+let onlineBusy = false;
+
+function setOnlineMsg(text) {
+  onlineMsg.textContent = text || '';
+}
+
+function showOnlinePanel(show) {
+  onlinePanel.classList.toggle('hidden', !show);
+  titleEl.classList.toggle('hidden', show || !menu);
+}
+
+function inviteLink(code) {
+  return `${location.origin}${location.pathname}?join=${code}`;
+}
+
+function startOnlineGame() {
+  showOnlinePanel(false);
+  unlockAudio();
+  menu = false;
+  vsComputer = false;
+  controls.enabled = true;
+  updateHUD();
+}
+
+function updateNetStatus() {
+  if (!online) {
+    netStatus.classList.add('hidden');
+    return;
+  }
+  netStatus.classList.remove('hidden');
+  netStatus.classList.toggle('off', !opponentHere);
+  netStatus.textContent = `Online · room ${online.code} · you are ${SIDE_NAME[mySide]} · ${opponentHere ? 'opponent connected' : 'waiting for opponent'}`;
+}
+
+async function goOnline(role, code) {
+  if (onlineBusy) return;
+  onlineBusy = true;
+  online?.close();
+  online = null;
+  opponentHere = false;
+  try {
+    setOnlineMsg(role === 'host' ? 'Opening a room…' : `Joining ${code}…`);
+    const room = await openRoom({ role, code, onMessage: onNetMessage, onStatus: onNetStatus });
+    online = room;
+    mySide = room.side;
+    if (role === 'host') {
+      onlineShare.classList.remove('hidden');
+      onlineCodeEl.textContent = code;
+      setOnlineMsg('Waiting for the other player to join…');
+    }
+    updateHUD();
+  } catch (err) {
+    setOnlineMsg(err.message || String(err));
+  } finally {
+    onlineBusy = false;
+  }
+}
+
+$('btn-online').addEventListener('click', () => {
+  unlockAudio();
+  setOnlineMsg('');
+  showOnlinePanel(true);
+});
+$('btn-online-back').addEventListener('click', () => showOnlinePanel(false));
+$('btn-host').addEventListener('click', () => goOnline('host', makeCode()));
+$('btn-join').addEventListener('click', () => {
+  const code = cleanCode(joinInput.value);
+  if (code.length < 4) {
+    setOnlineMsg('Enter the code the other player sees.');
+    return;
+  }
+  goOnline('join', code);
+});
+joinInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') $('btn-join').click();
+});
+$('btn-copy-link').addEventListener('click', async () => {
+  const link = inviteLink(online?.code || onlineCodeEl.textContent);
+  try {
+    await navigator.clipboard.writeText(link);
+    setOnlineMsg(`Link copied: ${link}`);
+  } catch {
+    setOnlineMsg(`Send this link: ${link}`);
+  }
+});
+// Opening an invite link (…?join=CODE) goes straight to joining that game.
+{
+  const code = cleanCode(new URLSearchParams(location.search).get('join'));
+  if (code) {
+    joinInput.value = code;
+    showOnlinePanel(true);
+    goOnline('join', code);
+  }
+}
+
 btnOpponent.addEventListener('click', () => {
   vsComputer = !vsComputer;
   btnOpponent.textContent = vsComputer ? 'Vs computer' : '2 players';

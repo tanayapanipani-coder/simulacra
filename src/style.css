@@ -193,7 +193,7 @@ button.primary, #btn-play, #btn-again {
   letter-spacing: 0.04em;
 }
 
-#title, #gameover {
+#title, #gameover, #online {
   pointer-events: auto;
 }
 
@@ -350,3 +350,53 @@ code {
 #crosshair { transition: transform 0.15s ease; }
 #crosshair.locked { transform: translate(-50%, -50%) scale(0.7) rotate(45deg); border-color: #ff4a3a; }
 #crosshair.locked::before, #crosshair.locked::after { background: #ff4a3a; }
+
+/* Online play panel. */
+#online {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 6, 6, 0.72);
+}
+#online.hidden { display: none; }
+#online .card {
+  width: min(92vw, 460px);
+  padding: 1.4rem 1.4rem 1.2rem;
+  background: rgba(18, 14, 12, 0.96);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+#online h2 {
+  font-family: var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 0.15rem 0 0.6rem;
+}
+.online-row { display: flex; gap: 0.5rem; justify-content: center; margin: 0.6rem 0; }
+#join-code {
+  width: 8.5rem;
+  padding: 0.55rem 0.8rem;
+  font: 600 1.15rem/1 var(--display);
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #f3ead7;
+  background: #1c1612;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.code-label, .or { margin: 0.8rem 0 0.2rem; color: var(--muted); font-size: 0.85rem; }
+.code {
+  margin: 0 0 0.6rem;
+  font: 700 2.2rem/1 var(--display);
+  letter-spacing: 0.25em;
+  color: var(--gold);
+}
+#net-status {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: #b9e6c9;
+}
+#net-status.off { color: #ffb3a8; }
+#net-status.hidden { display: none; }

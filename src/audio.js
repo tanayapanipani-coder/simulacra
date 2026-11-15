@@ -289,3 +289,45 @@ const SFX = {
 export function playSfx(event, arg) {
   SFX[event]?.(arg);
 }
+
+// ---------------------------------------------------------------------------
+// War ambience for the duels: a catapult boom, and a distant battle (war
+// drums, clashing steel, the odd horn) looping underneath the fight.
+
+export function playBoom(near = 1) {
+  if (muted) return;
+  const g = Math.max(0.15, Math.min(1, near));
+  // Low thump that drops in pitch, plus a crackling noise tail.
+  playTone(90, 0.55, 'sine', 0.22 * g, 34);
+  playTone(60, 0.8, 'triangle', 0.12 * g, 28);
+  bandNoise('lowpass', 1600, 180, 0.9, 0.16 * g, 0.5);
+}
+
+let warTimer = 0;
+let warBeat = 0;
+export function startWarAmbience() {
+  stopWarAmbience();
+  warBeat = 0;
+  warTimer = setInterval(() => {
+    if (muted) return;
+    warBeat += 1;
+    // War drums: a heavy beat with a lighter answer, at a march tempo.
+    if (warBeat % 4 === 0) playTone(70, 0.35, 'sine', 0.09, 45);
+    if (warBeat % 4 === 2) playTone(95, 0.22, 'sine', 0.05, 60);
+    // Distant steel on steel.
+    if (Math.random() < 0.18) {
+      bandNoise('bandpass', 4200 + Math.random() * 1500, 2600, 0.08, 0.035, 6);
+      playTone(1800 + Math.random() * 900, 0.12, 'triangle', 0.012);
+    }
+    // A horn across the field now and then.
+    if (Math.random() < 0.012) {
+      playTone(147, 1.3, 'sawtooth', 0.018, 140);
+      setTimeout(() => playTone(196, 1.0, 'sawtooth', 0.015, 185), 500);
+    }
+  }, 160);
+}
+
+export function stopWarAmbience() {
+  clearInterval(warTimer);
+  warTimer = 0;
+}
