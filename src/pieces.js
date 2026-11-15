@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { buildRanger, RANGER_PALETTES } from './ranger.js?v=2d3f255';
-import { createRig } from './rig.js?v=2d3f255';
+import { buildRanger, RANGER_PALETTES } from './ranger.js?v=a82fff1';
+import { createRig } from './rig.js?v=a82fff1';
+import { asBump, leatherTex, steelRough, steelTex, woodTex } from './textures.js?v=a82fff1';
 
 const MINI_SCALE = 0.045;
 
@@ -31,146 +32,191 @@ function add(group, mesh) {
 
 export function createMiniature(type, side) {
   const group = new THREE.Group();
-  const gold = side === 0;
-  const primary = metal(gold ? 0xf2d48a : 0xd5d2f4, gold ? 0x5a3d12 : 0x2a2150);
-  const accent = metal(gold ? 0xffe6a6 : 0xf2ecff, gold ? 0x7a5418 : 0x3d2c78);
-  accent.emissiveIntensity = 0.55;
-  const cloth = standard(gold ? 0x8d2434 : 0x2a1858, 0.62);
-  const leather = standard(gold ? 0x4a301c : 0x241c28, 0.72);
-  const dark = metal(gold ? 0x6e5428 : 0x6a6790, 0x000000);
-
-  if (type === 'S' || type === 'A') {
-    const figure = buildRanger({
-      kind: type === 'A' ? 'archer' : 'sword',
-      palette: RANGER_PALETTES[gold ? 0 : 1],
-      pose: 'mini',
-    });
-    figure.scale.setScalar(MINI_SCALE);
-    group.add(figure);
-    group.traverse((obj) => {
-      if (obj.isMesh) obj.userData.mini = true;
-    });
-    return group;
-  }
-
-  const base = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.023, 0.007, 18), primary));
-  base.position.y = 0.0035;
-  const ring = add(group, new THREE.Mesh(new THREE.TorusGeometry(0.0175, 0.0024, 6, 20), accent));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.0072;
-
-  buildMonarch(group, { primary, accent, cloth, leather, dark });
-
+  const kind = type === 'A' ? 'archer' : type === 'S' ? 'sword' : 'king';
+  const figure = buildRanger({ kind, palette: RANGER_PALETTES[side === 0 ? 0 : 1], pose: 'mini' });
+  figure.scale.setScalar(MINI_SCALE);
+  group.add(figure);
   group.traverse((obj) => {
     if (obj.isMesh) obj.userData.mini = true;
   });
   return group;
 }
 
-function buildMonarch(group, m) {
-  const robe = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.042, 8), m.cloth));
-  robe.position.y = 0.03;
-  const trim = add(group, new THREE.Mesh(new THREE.TorusGeometry(0.012, 0.002, 6, 16), m.primary));
-  trim.rotation.x = Math.PI / 2;
-  trim.position.y = 0.022;
-  const torso = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.018, 8), m.primary));
-  torso.position.y = 0.048;
-  const head = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.0074, 10, 8), m.leather));
-  head.position.y = 0.064;
-  const crown = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.007, 0.008, 6), m.accent));
-  crown.position.y = 0.074;
-  for (let i = 0; i < 4; i++) {
-    const prong = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.0022, 0.008, 4), m.accent));
-    const a = (i / 4) * Math.PI * 2;
-    prong.position.set(Math.cos(a) * 0.006, 0.08, Math.sin(a) * 0.006);
-  }
-  const jewel = add(group, new THREE.Mesh(new THREE.OctahedronGeometry(0.0032, 0), standard(0x9ad7ff, 0.2)));
-  jewel.position.y = 0.086;
-  const cape = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.04, 7, 1, true), m.cloth));
-  cape.position.set(0, 0.034, -0.004);
-  cape.rotation.x = 0.15;
-  const scepter = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.0014, 0.0014, 0.03, 5), m.primary));
-  scepter.position.set(0.012, 0.05, 0.006);
-  scepter.rotation.z = -0.35;
-  const orb = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 6), m.accent));
-  orb.position.set(0.017, 0.064, 0.008);
+// Shared, textured materials for the player's own weapons.
+let weaponMats = null;
+function wm() {
+  if (weaponMats) return weaponMats;
+  const steelMap = steelTex();
+  weaponMats = {
+    blade: new THREE.MeshStandardMaterial({ color: 0xd0d4da, metalness: 0.96, roughness: 0.18, map: steelMap, roughnessMap: steelRough() }),
+    steelDark: new THREE.MeshStandardMaterial({ color: 0x55575d, metalness: 0.85, roughness: 0.42, map: steelMap }),
+    brass: new THREE.MeshStandardMaterial({ color: 0x8c6d36, metalness: 0.8, roughness: 0.4, map: steelMap }),
+    grip: new THREE.MeshStandardMaterial({ color: 0x2a1c13, roughness: 0.8, map: leatherTex(), bumpMap: asBump(leatherTex()), bumpScale: 1 }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x3e2a1b, roughness: 0.65, map: woodTex() }),
+    woodPale: new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.7, map: woodTex() }),
+    string: new THREE.MeshStandardMaterial({ color: 0x2e2822, roughness: 0.9 }),
+    feather: new THREE.MeshStandardMaterial({ color: 0x8e8880, roughness: 0.9, side: THREE.DoubleSide }),
+    featherDark: new THREE.MeshStandardMaterial({ color: 0x2a2624, roughness: 0.9, side: THREE.DoubleSide }),
+  };
+  return weaponMats;
 }
 
-export function createBattleSword(hex = 0xf0d090) {
+export function createBattleSword() {
+  // A knightly longsword. Grip at the origin, blade along -Z, edges along ±X.
   const group = new THREE.Group();
-  const bladeMat = metal(hex, 0x3a2a10);
-  bladeMat.emissiveIntensity = 0.55;
-  const gripMat = standard(0x3a2416, 0.62);
-  const grip = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.2, 8), gripMat));
-  grip.rotation.x = Math.PI / 2;
-  grip.position.z = -0.02;
-  const pommel = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), bladeMat));
-  pommel.position.z = 0.09;
-  const guard = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.028, 0.045), bladeMat));
-  guard.position.z = -0.13;
-  const blade = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.012, 0.62), bladeMat));
-  blade.position.z = -0.46;
-  const fuller = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.48), metal(0xfff4d2, 0x6a5018)));
-  fuller.position.z = -0.44;
-  // The point: the blade's own width and thickness tapering to a sharp tip,
-  // with a short shoulder so the edges flow into it. Drawn as a flat profile
-  // (x across the blade, y toward the point), extruded to the blade's
-  // thickness, then laid along -Z.
-  const pointShape = new THREE.Shape();
-  pointShape.moveTo(-0.0275, 0);
-  pointShape.lineTo(0.0275, 0);
-  pointShape.lineTo(0.022, 0.05);
-  pointShape.lineTo(0, 0.15);
-  pointShape.lineTo(-0.022, 0.05);
-  pointShape.closePath();
-  const pointGeo = new THREE.ExtrudeGeometry(pointShape, {
-    depth: 0.008,
+  const m = wm();
+  add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.02, 0.2, 10), m.grip)).rotation.x = Math.PI / 2;
+  group.children[0].position.z = -0.02;
+  for (const z of [-0.08, 0.04]) {
+    const ring = add(group, new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.004, 5, 12), m.steelDark));
+    ring.position.z = z;
+  }
+  const pommel = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.036, 12, 8), m.steelDark));
+  pommel.scale.set(1, 0.55, 1);
+  pommel.rotation.x = Math.PI / 2;
+  pommel.position.z = 0.1;
+  // A straight cross with flared, down-turned ends.
+  const cross = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.016, 0.26, 8), m.steelDark));
+  cross.rotation.z = Math.PI / 2;
+  cross.position.z = -0.13;
+  for (const sx of [-1, 1]) {
+    const end = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), m.steelDark));
+    end.position.set(sx * 0.13, 0, -0.13);
+  }
+  // Blade profile: x across the blade, y toward the point; a long gentle taper
+  // into a sharp point, bevelled so the light runs down the edges.
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.028, 0);
+  shape.lineTo(0.028, 0);
+  shape.lineTo(0.022, 0.6);
+  shape.quadraticCurveTo(0.016, 0.7, 0, 0.78);
+  shape.quadraticCurveTo(-0.016, 0.7, -0.022, 0.6);
+  shape.closePath();
+  const bladeGeo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.004,
     bevelEnabled: true,
-    bevelThickness: 0.002,
-    bevelSize: 0.0015,
+    bevelThickness: 0.004,
+    bevelSize: 0.006,
     bevelSegments: 1,
+    curveSegments: 6,
   });
-  pointGeo.translate(0, 0, -0.004);
-  pointGeo.rotateX(-Math.PI / 2);
-  const tip = add(group, new THREE.Mesh(pointGeo, bladeMat));
-  tip.position.z = -0.769;
-  // Both cutting edges run along local ±X. A glowing strip marks each, so the
-  // player can see which way the edge faces; combat brightens them while a
-  // swing is leading with the edge.
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xfff6dc, emissive: 0xffe6a0, emissiveIntensity: 0.5, roughness: 0.3 });
+  bladeGeo.translate(0, 0, -0.002);
+  bladeGeo.rotateX(-Math.PI / 2);
+  const blade = add(group, new THREE.Mesh(bladeGeo, m.blade));
+  blade.position.z = -0.14;
+  // The fuller: a dark groove down both faces.
+  for (const sy of [-1, 1]) {
+    const fuller = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.002, 0.5), m.steelDark));
+    fuller.position.set(0, sy * 0.0055, -0.42);
+  }
+  // Faint edge lines; combat brightens them while a swing leads with the edge.
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, emissive: 0xbfd4ff, emissiveIntensity: 0.15, metalness: 0.9, roughness: 0.15 });
   for (const side of [-1, 1]) {
-    const edge = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.014, 0.6), edgeMat));
-    edge.position.set(side * 0.0285, 0, -0.46);
+    const edge = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.003, 0.58), edgeMat));
+    edge.position.set(side * 0.031, 0, -0.43);
+    edge.rotation.y = side * 0.01;
   }
   group.userData.edgeMat = edgeMat;
-  group.userData.tip = new THREE.Vector3(0, 0, -0.9);
+  group.userData.tip = new THREE.Vector3(0, 0, -0.92);
   group.userData.base = new THREE.Vector3(0, 0, -0.14);
   return group;
 }
 
-export function createBattleShield(hex = 0xf0d090) {
+export function createBattleShield() {
+  // A heater shield held on the forearm: painted wood (the player's Gold
+  // court), an iron rim and a central boss, face toward -Z.
   const group = new THREE.Group();
-  const face = metal(hex, 0x2a2010);
-  const disc = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.045, 16), face));
-  disc.rotation.x = Math.PI / 2;
-  const boss = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), metal(0xfff1c4, 0x5a4010)));
-  boss.position.z = -0.04;
-  const rim = add(group, new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.02, 6, 18), metal(0x8d7340)));
+  const m = wm();
+  const outline = new THREE.Shape();
+  outline.moveTo(-0.27, 0.3);
+  outline.quadraticCurveTo(0, 0.34, 0.27, 0.3);
+  outline.lineTo(0.27, 0.05);
+  outline.quadraticCurveTo(0.25, -0.24, 0, -0.42);
+  outline.quadraticCurveTo(-0.25, -0.24, -0.27, 0.05);
+  outline.closePath();
+  const geo = new THREE.ExtrudeGeometry(outline, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2, curveSegments: 10 });
+  geo.translate(0, 0, -0.015);
+  const pos = geo.attributes.position;
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, 1 - (pos.getX(i) + 0.28) / 0.56, (pos.getY(i) + 0.43) / 0.78);
+  uv.needsUpdate = true;
+  const face = new THREE.MeshStandardMaterial({ map: shieldHeraldry(0), roughness: 0.68, metalness: 0.05 });
+  group.userData.setCourt = (side) => {
+    face.map = shieldHeraldry(side);
+  };
+  add(group, new THREE.Mesh(geo, [face, m.wood]));
+  const rimPts = outline.getPoints(20).map((p) => new THREE.Vector3(p.x, p.y, -0.025));
+  add(group, new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts, true), 70, 0.013, 6, true), m.steelDark));
+  const boss = add(group, new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), m.steelDark));
+  boss.rotation.x = -Math.PI / 2;
+  boss.position.set(0, 0.04, -0.025);
   group.position.z = -0.05;
   return group;
 }
 
+const heraldryTex = [];
+function shieldHeraldry(side) {
+  if (heraldryTex[side]) return heraldryTex[side];
+  const [field, charge] = side === 0 ? ['#5c1513', '#a8843f'] : ['#1b1f3e', '#a3a9b3'];
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = field;
+  g.fillRect(0, 0, 256, 256);
+  // A chevron and three roundels in the court's metal: simple, heraldic.
+  g.fillStyle = charge;
+  g.beginPath();
+  g.moveTo(0, 170);
+  g.lineTo(128, 80);
+  g.lineTo(256, 170);
+  g.lineTo(256, 205);
+  g.lineTo(128, 115);
+  g.lineTo(0, 205);
+  g.closePath();
+  g.fill();
+  for (const [x, y] of [[70, 50], [186, 50], [128, 200]]) {
+    g.beginPath();
+    g.arc(x, y, 17, 0, Math.PI * 2);
+    g.fill();
+  }
+  // Battle damage: scrapes, chips and grime.
+  for (let i = 0; i < 220; i++) {
+    g.strokeStyle = `rgba(${Math.random() < 0.6 ? '20,14,10' : '190,175,150'},${0.12 + Math.random() * 0.3})`;
+    g.lineWidth = 0.5 + Math.random() * 1.5;
+    const x = Math.random() * 256;
+    const y = Math.random() * 256;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 40);
+    g.stroke();
+  }
+  const grime = g.createRadialGradient(128, 128, 40, 128, 128, 190);
+  grime.addColorStop(0, 'rgba(0,0,0,0)');
+  grime.addColorStop(1, 'rgba(20,12,6,0.55)');
+  g.fillStyle = grime;
+  g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  heraldryTex[side] = tex;
+  return tex;
+}
+
 export function createBattleBow(hex = 0xf0d090) {
   const group = new THREE.Group();
-  const wood = standard(0x6a4324, 0.55);
-  const accent = metal(hex, 0x3a2a10);
-  const curve = new THREE.QuadraticBezierCurve3(
-    new THREE.Vector3(0, -0.58, 0.08),
-    new THREE.Vector3(0, 0, -0.32),
-    new THREE.Vector3(0, 0.58, 0.08),
-  );
-  const limb = add(group, new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.014, 6, false), wood));
-  const wrap = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), accent));
+  const m = wm();
+  // A dark-wood recurve: limbs bending away from the archer, tips curling
+  // back toward the string.
+  const half = [[0, 0], [-0.02, 0.12], [-0.1, 0.3], [-0.09, 0.44], [0.03, 0.54], [0.08, 0.58]];
+  const pts = [];
+  for (let i = half.length - 1; i > 0; i--) pts.push(new THREE.Vector3(0, -half[i][1], half[i][0]));
+  for (const [z, y] of half) pts.push(new THREE.Vector3(0, y, z));
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+  add(group, new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.017, 8, false), m.wood)).scale.set(0.7, 1, 1);
+  add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.13, 10), m.grip));
+  for (const y of [-0.07, 0.07]) add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.01, 10), m.brass)).position.y = y;
+  const accent = m.string;
   // The string is two segments from the limb tips to the nock point, so it
   // bends to wherever it is drawn from (see setBowString).
   const strGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 4);
@@ -187,7 +233,7 @@ export function createBattleBow(hex = 0xf0d090) {
   group.userData.restZ = 0.08;
   // A gloved drawing hand that sits on the string while it is pulled back.
   const glove = new THREE.Group();
-  const leather = standard(0x5a3a24, 0.7);
+  const leather = m.grip;
   add(glove, new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.085, 0.06), leather)).position.set(0.03, -0.02, 0.03);
   for (let i = 0; i < 3; i++) {
     const finger = add(glove, new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.02, 0.05), leather));
@@ -228,18 +274,23 @@ export function setBowString(bow, nockLocal) {
 }
 
 export function createArrowMesh(hex = 0xe8d2a0) {
+  // Points down -Z with the nock at +0.36: ash shaft, steel bodkin, fletching.
   const group = new THREE.Group();
-  const shaft = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.72, 5), standard(0x8b5a32, 0.5)));
+  const m = wm();
+  const shaft = add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.72, 6), m.woodPale));
   shaft.rotation.x = Math.PI / 2;
-  const head = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.14, 5), metal(hex, 0x33240e)));
-  head.rotation.x = Math.PI / 2;
+  const head = add(group, new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.09, 4), m.steelDark));
+  head.rotation.x = -Math.PI / 2;
   head.position.z = -0.4;
-  const fletchMat = standard(0xf2efe6, 0.45);
+  const fletch = hex === 0xd7c4a2 ? m.featherDark : m.feather;
   for (const rot of [0, 2.1, 4.2]) {
-    const f = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.004, 0.12), fletchMat));
+    const f = add(group, new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.0015, 0.11), fletch));
     f.position.set(0, 0, 0.28);
     f.rotation.z = rot;
+    f.translateX(0.014);
   }
+  add(group, new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.02, 6), m.string)).rotation.x = Math.PI / 2;
+  group.children[group.children.length - 1].position.z = 0.355;
   return group;
 }
 

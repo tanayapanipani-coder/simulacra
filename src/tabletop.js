@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=2d3f255';
-import { createMiniature, metal, standard } from './pieces.js?v=2d3f255';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=2d3f255';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=a82fff1';
+import { createMiniature, metal, standard } from './pieces.js?v=a82fff1';
+import { steelTex, woodTex } from './textures.js?v=a82fff1';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=a82fff1';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -86,8 +87,8 @@ export function createTabletop(scene, sfx = {}) {
   const board = new THREE.Group();
   scene.add(board);
 
-  const bodyMat = standard(0x221c18, 0.78);
-  bodyMat.color.set(0x2a221c);
+  // Dark oak body with an aged-bronze rim.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.7, map: woodTex() });
   const body = new THREE.Mesh(new THREE.BoxGeometry(TOP + 0.045, 0.024, TOP + 0.045), bodyMat);
   body.position.y = 0.012;
   board.add(body);
@@ -104,7 +105,7 @@ export function createTabletop(scene, sfx = {}) {
   top.position.y = 0.0245;
   board.add(top);
 
-  const brass = metal(0xc6a15a, 0x3a2a10);
+  const brass = new THREE.MeshStandardMaterial({ color: 0x8a6c3c, metalness: 0.75, roughness: 0.42, map: steelTex() });
   const rimH = 0.012;
   const rimY = 0.028;
   const outer = TOP / 2 + 0.02;
@@ -147,7 +148,7 @@ export function createTabletop(scene, sfx = {}) {
   const turnBars = [0, 1].map((side) => {
     const bar = new THREE.Mesh(
       new THREE.BoxGeometry(TOP + 0.05, 0.006, 0.02),
-      new THREE.MeshBasicMaterial({ color: SIDE_GLOW[side], transparent: true, opacity: 0.9 }),
+      new THREE.MeshBasicMaterial({ color: SIDE_GLOW[side], transparent: true, opacity: 0.6 }),
     );
     bar.position.set(0, 0.037, side === 0 ? TOP / 2 + 0.02 : -(TOP / 2 + 0.02));
     bar.raycast = () => {};
@@ -580,9 +581,12 @@ function buildRoom() {
     const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff9a55 }));
     flame.position.set(x, 2.45, z);
     room.add(flame);
-    const light = new THREE.PointLight(0xff8a4a, 3.2, 3.5, 2);
-    light.position.set(x, 2.4, z);
-    room.add(light);
+    // Only the two far braziers light the room: point lights are costly on Quest.
+    if (z < -2) {
+      const light = new THREE.PointLight(0xff8a4a, 4.2, 4.5, 2);
+      light.position.set(x, 2.4, z);
+      room.add(light);
+    }
   }
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(5.5, 24, 16),

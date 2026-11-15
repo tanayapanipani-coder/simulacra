@@ -1,6 +1,73 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=2d3f255';
-import { playBoom } from './audio.js?v=2d3f255';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=a82fff1';
+import { playBoom } from './audio.js?v=a82fff1';
+import { mudTex, stoneTex, woodTex, asBump, steelTex } from './textures.js?v=a82fff1';
+
+// The Blender scenes carry flat vertex colours. On load, every surface gets
+// tiling detail (mud and gravel, dressed stone, wood grain, pitted iron) laid
+// on with box-projected UVs, and casts / catches the sun's shadow.
+const DETAIL = [
+  [/ground|mud|crater|scorch/i, () => mudTex(), 1.6, 1.4],
+  [/stone|rock|wall|ruin|castle/i, () => stoneTex(), 1.8, 1.2],
+  [/wood|char|palisade|log|plank/i, () => woodTex(), 0.9, 0.6],
+  [/iron|metal|steel/i, () => steelTex(), 0.8, 0.3],
+];
+function boxUV(geo, tile) {
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  if (!pos || !nrm) return;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const ax = Math.abs(nrm.getX(i));
+    const ay = Math.abs(nrm.getY(i));
+    const az = Math.abs(nrm.getZ(i));
+    let u;
+    let v;
+    if (ay >= ax && ay >= az) [u, v] = [pos.getX(i), pos.getZ(i)];
+    else if (ax >= az) [u, v] = [pos.getZ(i), pos.getY(i)];
+    else [u, v] = [pos.getX(i), pos.getY(i)];
+    uv[i * 2] = u / tile;
+    uv[i * 2 + 1] = v / tile;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+const detailed = new Map();
+export function dressScene(scene, { shadows = true } = {}) {
+  scene.updateMatrixWorld(true);
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.receiveShadow = shadows;
+    // Only person-sized props cast: long walls and palisades under a low
+    // sun would throw the whole arena into shade.
+    o.geometry.computeBoundingBox();
+    const size = o.geometry.boundingBox.getSize(new THREE.Vector3()).multiply(o.getWorldScale(new THREE.Vector3()));
+    o.castShadow = shadows && size.x * size.z < 6 && !/ground|terrain/i.test(o.name + (o.material?.name || ''));
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (let k = 0; k < mats.length; k++) {
+      const mat = mats[k];
+      if (!mat || mat.map || mat.emissiveMap || (mat.emissive && mat.emissive.getHex() > 0x101010)) continue;
+      const rule = DETAIL.find(([re]) => re.test(mat.name || '') || re.test(o.name));
+      if (!rule) continue;
+      const [, texFn, tile, bump] = rule;
+      // Box-project in the mesh's own scaled units so tiling matches across props.
+      const sc = o.getWorldScale(new THREE.Vector3()).x || 1;
+      if (!o.geometry.attributes.uv || !o.geometry.userData.boxUV) {
+        o.geometry = o.geometry.clone();
+        boxUV(o.geometry, tile / sc);
+        o.geometry.userData.boxUV = true;
+      }
+      const key = mat.uuid;
+      if (!detailed.has(key)) {
+        const map = texFn();
+        mat.map = map;
+        mat.bumpMap = asBump(map);
+        mat.bumpScale = bump;
+        mat.needsUpdate = true;
+        detailed.set(key, mat);
+      }
+    }
+  });
+}
 
 // Set pieces modelled in Blender (tools/blender/war_props.py): ruined walls,
 // a wrecked catapult, a burnt siege tower, an overturned cart, torn tents, a
@@ -93,6 +160,29 @@ function loadWarProps() {
     });
   }
   return propsPromise;
+}
+
+/** A PMREM environment of the battlefield sky, for metal reflections. */
+export function makeSkyEnvironment(renderer) {
+  try {
+    const env = new THREE.Scene();
+    const sky = makeSky();
+    sky.scale.setScalar(0.5);
+    env.add(sky);
+    // A dark, muddy lower hemisphere so armour doesn't mirror the sky below.
+    const ground = new THREE.Mesh(
+      new THREE.SphereGeometry(30, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x4a3626, side: THREE.BackSide }),
+    );
+    env.add(ground);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const tex = pmrem.fromScene(env, 0.02).texture;
+    pmrem.dispose();
+    return tex;
+  } catch (err) {
+    console.warn('Battle environment skipped', err);
+    return null;
+  }
 }
 
 // A battlefield that surrounds the duels.
@@ -317,7 +407,9 @@ export function createWarZone(group) {
       flames.push({ s, phase: rand(0, 6), size: rand(0.6, 0.9) });
     }
     fires.push({ x, z, flames, smokeT: rand(0, 1) });
-    if (i < 3) {
+    // Two flickering lights are plenty; per-fragment point lights are what
+    // costs most on a standalone headset.
+    if (i < 2) {
       const light = new THREE.PointLight(0xff7a30, 6, 9, 2);
       light.position.set(x, 0.9, z);
       root.add(light);
@@ -327,7 +419,7 @@ export function createWarZone(group) {
 
   // ------------------------------------------------------------- smoke --
   const smoke = [];
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 30; i++) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.puff, color: 0x3a3632, transparent: true, depthWrite: false, opacity: 0 }));
     s.visible = false;
     root.add(s);
@@ -351,7 +443,7 @@ export function createWarZone(group) {
   }
 
   // ------------------------------------------------------------ embers --
-  const EMBERS = 160;
+  const EMBERS = 110;
   const emberPos = new Float32Array(EMBERS * 3);
   const emberVel = new Float32Array(EMBERS * 3);
   const emberLife = new Float32Array(EMBERS);
@@ -426,6 +518,7 @@ export function createWarZone(group) {
     if (!gltf) return;
     const props = gltf.scene;
     props.name = 'war_props';
+    dressScene(props);
     root.add(props);
     for (const node of props.children) {
       if (!node.name.startsWith('FIRE_')) continue;
@@ -451,7 +544,7 @@ export function createWarZone(group) {
   let fieldLoaded = false;
   const plumes = [];
   const plumePool = [];
-  for (let i = 0; i < 44; i++) {
+  for (let i = 0; i < 24; i++) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex.puff, color: 0x2e2a27, transparent: true, depthWrite: false, opacity: 0 }));
     s.visible = false;
     far.add(s);
@@ -475,6 +568,11 @@ export function createWarZone(group) {
   loadBattlefield().then((gltf) => {
     if (!gltf) return;
     const field = gltf.scene;
+    // The far field only catches shadows; it is too big to cast them cheaply.
+    dressScene(field);
+    field.traverse((o) => {
+      if (o.isMesh) o.castShadow = false;
+    });
     far.add(field);
     for (const node of field.children) {
       const { x, y, z } = node.position;

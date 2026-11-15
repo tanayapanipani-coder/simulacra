@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=2d3f255';
+import { clashBlurb } from './rules.js?v=a82fff1';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=2d3f255';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=2d3f255';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=2d3f255';
-import { createWarZone } from './war.js?v=2d3f255';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=2d3f255';
+} from './pieces.js?v=a82fff1';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=a82fff1';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=a82fff1';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=a82fff1';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=a82fff1';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -119,8 +119,34 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   // in the player's real room, which the war zone turns into a battlefield.
   const arenaBackdrop = buildArena(group);
   const war = createWarZone(group);
+  // In AR the real floor catches the soldiers' shadows.
+  let quality = 'high';
+  const shadowCatcher = new THREE.Mesh(
+    new THREE.CircleGeometry(7, 32),
+    new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.42, depthWrite: false }),
+  );
+  shadowCatcher.rotation.x = -Math.PI / 2;
+  shadowCatcher.position.y = 0.003;
+  shadowCatcher.receiveShadow = true;
+  group.add(shadowCatcher);
+  // Steel reflects the smoky battlefield sky, not a studio.
+  let battleEnv = null;
+  let savedEnv = null;
+  function useBattleEnv(on) {
+    if (on) {
+      if (!battleEnv) battleEnv = makeSkyEnvironment(renderer);
+      if (!battleEnv) return;
+      savedEnv = scene.environment;
+      scene.environment = battleEnv;
+    } else if (battleEnv && scene.environment === battleEnv) {
+      scene.environment = savedEnv;
+    }
+  }
   function applyArenaMode() {
     const ar = !!hooks.isAR?.();
+    shadowCatcher.visible = ar;
+    // Shadows are the first thing to go if the headset is struggling.
+    if (arenaBackdrop.sun) arenaBackdrop.sun.castShadow = quality !== 'low';
     // The plain night arena only shows if the battlefield failed to load.
     for (const obj of arenaBackdrop) obj.visible = !ar && !war.hasField();
     war.setAR(ar);
@@ -130,6 +156,11 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   const sword = createBattleSword(0xf0d090);
   const bow = createBattleBow(0xf0d090);
   const shield = createBattleShield(0xd9d4f0);
+  for (const w of [sword, bow, shield]) {
+    w.traverse((o) => {
+      if (o.isMesh) o.castShadow = true;
+    });
+  }
   sword.visible = false;
   bow.visible = false;
   shield.visible = false;
@@ -210,18 +241,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   }
 
   function setWeaponColor(side) {
+    // Steel stays steel; the player's court shows on the shield's paint.
     weaponColor = side === 0 ? 0xf0d090 : 0xd5d0ff;
-    sword.traverse((obj) => {
-      if (obj.isMesh && obj.material?.metalness > 0.4) {
-        obj.material.color.set(weaponColor);
-        obj.material.emissive?.set(side === 0 ? 0x5a4014 : 0x2a2158);
-      }
-    });
-    bow.traverse((obj) => {
-      if (obj.isMesh && obj.material?.metalness > 0.4) {
-        obj.material.color.set(weaponColor);
-      }
-    });
+    shield.userData.setCourt?.(side);
   }
 
   function detachWeapons() {
@@ -565,6 +587,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     presented = renderer.xr.isPresenting;
     group.visible = true;
     war.reset();
+    useBattleEnv(true);
     applyArenaMode();
     startWarAmbience();
     anchor();
@@ -593,6 +616,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     mousePull = false;
     detachWeapons();
     clearActors();
+    useBattleEnv(false);
     group.visible = false;
     anchored = false;
     active = false;
@@ -1333,6 +1357,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     update,
     force,
     isActive: () => active,
+    setQuality(q) {
+      quality = q;
+      applyArenaMode();
+    },
   };
 }
 
@@ -1342,6 +1370,7 @@ function buildArena(group) {
     new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.95, metalness: 0 }),
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
   group.add(ground);
 
   const ring = new THREE.Mesh(
@@ -1368,11 +1397,24 @@ function buildArena(group) {
   backdrop.push(moon);
 
   // Warm, smoky daylight: a low sun (matching the sky) and a dusty fill.
-  const hemi = new THREE.HemisphereLight(0xc49a72, 0x2a1d14, 0.8);
+  const hemi = new THREE.HemisphereLight(0xd0a57c, 0x3a2a1c, 1.15);
   group.add(hemi);
-  const moonLight = new THREE.DirectionalLight(0xffb878, 2.1);
-  moonLight.position.set(-4.5, 2.2, -8.6);
-  group.add(moonLight);
+  const moonLight = new THREE.DirectionalLight(0xffb878, 2.4);
+  moonLight.position.set(-4.5, 3.6, -8.6);
+  // A low sun throws long shadows from the attackers toward the player.
+  moonLight.castShadow = true;
+  moonLight.shadow.mapSize.set(1024, 1024);
+  const sc = moonLight.shadow.camera;
+  sc.left = -7;
+  sc.right = 7;
+  sc.top = 5;
+  sc.bottom = -5;
+  sc.near = 1;
+  sc.far = 24;
+  moonLight.shadow.bias = -0.0008;
+  moonLight.shadow.normalBias = 0.03;
+  moonLight.target.position.set(0, 0, -2);
+  group.add(moonLight, moonLight.target);
 
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
@@ -1388,9 +1430,7 @@ function buildArena(group) {
       new THREE.MeshBasicMaterial({ color: 0xff8a3c }),
     );
     flame.position.set(x, 1.55, z);
-    const light = new THREE.PointLight(0xff7a3a, 5, 7, 2);
-    light.position.set(x, 1.55, z);
-    group.add(pole, flame, light);
+    group.add(pole, flame);
   }
 
   for (let i = 0; i < 6; i++) {
@@ -1402,7 +1442,14 @@ function buildArena(group) {
     rock.position.set(Math.sin(a) * (3 + (i % 3)), 0.18, -2.2 - (i % 4));
     rock.rotation.set(i, i * 0.4, 0);
     group.add(rock);
+    backdrop.push(rock);
   }
+  // A soft warm fill from behind the player so the attackers' armour and
+  // faces read against the low sun (no shadows; cheap).
+  const fill = new THREE.DirectionalLight(0xffd2a6, 0.85);
+  fill.position.set(2.5, 3, 6);
+  group.add(fill);
+  backdrop.sun = moonLight;
   return backdrop;
 }
 
