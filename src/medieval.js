@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=e1feae8';
+import { clothTex, steelTex } from './textures.js?v=af4bf79';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -9,7 +9,7 @@ import { clothTex, steelTex } from './textures.js?v=e1feae8';
 //     exactly (skin of the face, neck and hands, and hair untouched);
 //   - puffed sleeve-heads and the skirt's fall as meshes on
 //     her bones;
-//   - a thin gold circlet with a jewel on her brow.
+//   - a gold crown with a jewel on her brow.
 
 // Colours of the gown, in linear light (after the reference: a wine gown
 // under a dark green velvet bodice, gold-laced, with embroidered bands).
@@ -133,17 +133,25 @@ function circlet() {
   const g = new THREE.Group();
   const gold = new THREE.MeshStandardMaterial({ color: 0xd9a73e, metalness: 1, roughness: 0.25, emissive: 0x4a3008, emissiveIntensity: 0.4, map: steelTex() });
   const gem = new THREE.MeshStandardMaterial({ color: 0x7a0f2a, metalness: 0.2, roughness: 0.1, emissive: 0x5a0818, emissiveIntensity: 0.6 });
-  const band = new THREE.Mesh(new THREE.TorusGeometry(0.098, 0.006, 6, 40), gold);
-  band.rotation.x = Math.PI / 2;
+  // A crown, not a circlet: a broad gold band with tall points all round, the front one tallest.
+  gold.side = THREE.DoubleSide;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.101, 0.098, 0.032, 40, 1, true), gold);
   g.add(band);
-  // Small points round the band, a taller one at the front with a jewel.
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2;
-    const front = i === 0;
-    const h = front ? 0.04 : 0.018;
-    const p = new THREE.Mesh(new THREE.ConeGeometry(front ? 0.009 : 0.006, h, 4), gold);
-    p.position.set(Math.sin(a) * 0.098, h / 2, Math.cos(a) * 0.098);
+  for (const y of [-0.016, 0.016]) {
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(y > 0 ? 0.101 : 0.098, 0.004, 6, 40), gold);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = y;
+    g.add(rim);
+  }
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const h = i === 0 ? 0.07 : i % 2 === 0 ? 0.055 : 0.038;
+    const p = new THREE.Mesh(new THREE.ConeGeometry(0.014, h, 4), gold);
+    p.position.set(Math.sin(a) * 0.1, 0.016 + h / 2, Math.cos(a) * 0.1);
     g.add(p);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), i % 2 === 0 ? gem : gold);
+    tip.position.set(Math.sin(a) * 0.1, 0.016 + h, Math.cos(a) * 0.1);
+    g.add(tip);
   }
   const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.011, 10, 8), gem);
   jewel.position.set(0, 0.006, 0.104);

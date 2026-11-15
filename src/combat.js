@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=e1feae8';
+import { clashBlurb } from './rules.js?v=af4bf79';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,27 +7,27 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=e1feae8';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=e1feae8';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=e1feae8';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=e1feae8';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=e1feae8';
+} from './pieces.js?v=af4bf79';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=af4bf79';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=af4bf79';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=af4bf79';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=af4bf79';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
 const TUNING = {
-  // Two waves of ten swordsmen, each staggered in over about two seconds;
-  // the second charges once the first is down to its last three. Archer
-  // fights come in two volleys of eight.
-  meleeQuota: 20,
-  waveSize: 10,
+  // Two waves of swordsmen (eight, then seven), each staggered in over
+  // about two seconds; the second charges once the first is down to its
+  // last three. Archer fights come in two volleys of six.
+  meleeQuota: 15,
+  waveSize: 8,
   archerWaves: 2,
   waveStagger: [0.12, 0.32],
   // At most this many press the attack at once; the rest hold a ring
   // around the player and wait their turn (all of them once few are left).
   maxEngaged: 2,
   meleeSpeed: 3.7,
-  archerCount: 8,
+  archerCount: 6,
   archerInterval: 3.05,
   hearts: 8,
   enemyArrowSpeed: 8.2,

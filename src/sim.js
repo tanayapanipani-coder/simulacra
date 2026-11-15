@@ -1,4 +1,4 @@
-// Sim at the table: the Simulacra character as your Crownfall opponent and coach.
+// Sim at the table: the Simulacra character as your Coronet opponent and coach.
 //
 //   Body   the same character as the Simulacra app (webxr/avatar.js), standing across the board
 //          from you. She looks at you when either of you is talking, looks at the board and points
@@ -12,22 +12,33 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=e1feae8';
-import { createAvatar } from '../webxr/avatar.js?v=e1feae8';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=e1feae8';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=e1feae8';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=af4bf79';
+import { createAvatar } from '../webxr/avatar.js?v=af4bf79';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=af4bf79';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=af4bf79';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=e1feae8';
-import { dressMedieval } from './medieval.js?v=e1feae8';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=e1feae8';
+import { TOP, squareLocal } from './tabletop.js?v=af4bf79';
+import { dressMedieval } from './medieval.js?v=af4bf79';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=af4bf79';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
 
-const RULES = `Crownfall rules: a five-by-five board. Each side has, left to right on its back rank: archer, swordsman, monarch, swordsman, archer. A turn is one action with one piece. Every piece may step one square in any direction (straight or diagonal) onto an empty square. Archers and swordsmen may instead attack an enemy piece on an adjacent square (also diagonally); the monarch can never attack. Attacking the enemy monarch wins the game at once. Attacking an archer or swordsman starts a duel that the human fights by hand in first person, with a bow if their piece is an archer and a sword if it is a swordsman, and five hearts: if the attacker wins it takes the square, if it loses the attacking piece is removed. So every piece next to an enemy can be attacked by it, and the monarch must never end a turn next to an enemy archer or swordsman.
+const RULES = `Coronet rules: a five-by-five board. Each side has, left to right on its back rank: archer, swordsman, monarch, swordsman, archer. A turn is one action with one piece. Every piece may step one square in any direction (straight or diagonal) onto an empty square. Archers and swordsmen may instead attack an enemy piece on an adjacent square (also diagonally); the monarch can never attack. Attacking the enemy monarch wins the game at once. Attacking an archer or swordsman starts a duel that the human fights by hand in first person, with a bow if their piece is an archer and a sword if it is a swordsman, and five hearts: if the attacker wins it takes the square, if it loses the attacking piece is removed. So every piece next to an enemy can be attacked by it, and the monarch must never end a turn next to an enemy archer or swordsman.
 Squares are named like chess: files a to e from the user's left, ranks 1 to 5 from the user's side. The user plays Gold (starts on rank 1) and moves first. You play Violet (rank 5).`;
 
-export const INSTRUCTIONS = `You are Sim. You are standing across a small table from the user, playing the board game Crownfall against them and helping them get good at it. You have a body: they can see you.
+export const INSTRUCTIONS = `You are Sim, an AI person with a body, standing in the user's real room: they see you through their headset, life-sized.
+
+# Before any game
+At first there is no game. You are simply Sim, in everyday clothes, meeting someone. Greet them, chat, be warm and brief. You can move:
+- come_here or stand_in_front: walk over and stand in front of them ("come here", "stand in front of me").
+- walk_around: take a short stroll around the space in front of them and wave ("walk around", "show me how you move").
+- wave: wave your hand.
+Call the skill first, then say a few words at most ("Sure." "On my way."). Only say you are moving if you called a skill. Do not bring up the game yourself.
+When they ask to play a game (or say yes to one), say something like "Sure, let's play" and call start_game. A board appears between the two of you and you change into your court gown and crown. From then on you are their opponent in Coronet, as below.
+
+# During the game
+You are standing across a small table from the user, playing the board game Coronet against them and helping them get good at it.
 
 # Your attitude
 You play to win and you love a bit of trash talk. Cocky, quick, funny, never mean: think a friend who is very sure they will beat you. "You're going down." "Bold. Wrong, but bold." "Is that the plan? Cute." "My swordsmen send their regards." When you are losing, you get dramatic about it ("No! My beautiful archer!") instead of sulking, and you give real credit when they play well, grudgingly.
@@ -54,6 +65,11 @@ Messages starting with [game] come from the game, not from the user. They show w
 - If they ask what to do or for a hint, call suggest_move and give the move and the reason in one sentence. If they ask about the position, call get_board first.`;
 
 export const TOOLS = [
+  { type: 'function', name: 'come_here', description: 'Before the game: walk over to the user and stand in front of them.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { type: 'function', name: 'stand_in_front', description: 'Before the game: stand directly in front of the user, facing them.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { type: 'function', name: 'walk_around', description: 'Before the game: take a short stroll around the space in front of the user, waving, and come back.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { type: 'function', name: 'wave', description: 'Wave your hand at the user.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { type: 'function', name: 'start_game', description: 'Start the board game when the user asks to play: the board is set between you and you change into your gown and crown.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
   { type: 'function', name: 'suggest_move', description: "The strongest move available to the user right now and why. Use when they ask for a hint or what to do.", parameters: { type: 'object', properties: {}, additionalProperties: false } },
   { type: 'function', name: 'get_board', description: 'The current board, whose turn it is, and how the user has been doing in duels.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
 ];
@@ -79,7 +95,7 @@ export function sessionSettings() {
   };
 }
 
-export function createSim({ scene, board, getCamera, getGame, human, say }) {
+export function createSim({ scene, board, getCamera, getGame, human, say, startGame = null }) {
   const her = 1 - human;
   let storage = null;
   try { storage = window.localStorage; } catch (e) { /* not available */ }
@@ -91,8 +107,6 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   const avatar = createAvatar({ THREE, FBXLoader, scene, assetBase, lite: /OculusBrowser|Quest|Android|Mobile/i.test(navigator.userAgent) });
   let loaded = false;
   avatar.load().then(() => {
-    // Crownfall dresses her for the court: a velvet gown, cloak and circlet.
-    try { dressMedieval(avatar); } catch (e) { console.warn('medieval dress skipped', e); }
     loaded = true;
   });
   const pose = { x: 0, y: 0, z: 0, yaw: 0, speed01: 0, gesture: '', metres: 0 };
@@ -101,6 +115,17 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   const eyes = new THREE.Vector3();
   const spot = new THREE.Vector3();
   const centre = new THREE.Vector3();
+  // She arrives in everyday clothes. The court gown, cloak and crown go on when a game starts.
+  let wantDress = false;
+  let dressed = false;
+  // Where she stands, and the spots she is walking through to get somewhere (three.js x, z on the floor).
+  const at = { x: 0, z: 0, yaw: 0, known: false };
+  let route = [];
+  let beforeGame = false;
+  const fwd = new THREE.Vector3(0, 0, -1);
+  const WALK = 0.9; // metres a second
+  /** A spot `ahead` metres in front of the user and `side` metres to their right. */
+  const near = (ahead, side = 0, wave = false) => ({ x: eyes.x + fwd.x * ahead - fwd.z * side, z: eyes.z + fwd.z * ahead + fwd.x * side, wave });
   let attendBoardFor = 0; // seconds she keeps looking at the square she is playing
   let nextGesture = '';
   let voiceLevel = 0;
@@ -164,22 +189,76 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
     nextGesture = 'point';
   }
 
-  function update(dt, { visible, floorY }) {
+  function update(dt, { visible, floorY, prelude = false }) {
     avatar.root.visible = visible && loaded;
     sign.sprite.visible = false;
     if (!avatar.root.visible) return;
-    // Far edge of the board. The table is turned so this edge faces away from
-    // the user, and this spot does not change.
-    board.updateMatrixWorld(true);
-    spot.set(0, 0, -(TOP / 2 + 0.55));
-    board.localToWorld(spot);
-    centre.set(0, 0, 0);
-    board.localToWorld(centre);
-    pose.x = spot.x;
+    if (wantDress && !dressed) {
+      dressed = true;
+      try { dressMedieval(avatar); } catch (e) { console.warn('medieval dress skipped', e); }
+    }
+    beforeGame = prelude;
+    const cam = getCamera();
+    cam.getWorldPosition(eyes);
+    cam.getWorldDirection(fwd);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+    fwd.normalize();
+
+    // Where she is heading: before the game, wherever she was asked to go; in the game, her place
+    // at the far edge of the board (the table is turned so that edge faces away from the user).
+    let target = null;
+    let faceX = eyes.x;
+    let faceZ = eyes.z;
+    if (prelude) {
+      if (!at.known) {
+        const p = near(2.2);
+        at.x = p.x;
+        at.z = p.z;
+        at.yaw = Math.atan2(eyes.x - at.x, -(eyes.z - at.z));
+        at.known = true;
+      }
+      target = route[0] || null;
+    } else {
+      board.updateMatrixWorld(true);
+      spot.set(0, 0, -(TOP / 2 + 0.55));
+      board.localToWorld(spot);
+      centre.set(0, 0, 0);
+      board.localToWorld(centre);
+      route = [];
+      if (!at.known) {
+        at.x = spot.x;
+        at.z = spot.z;
+        at.known = true;
+      }
+      target = { x: spot.x, z: spot.z };
+      faceX = centre.x;
+      faceZ = centre.z;
+    }
+    let moved = 0;
+    let wantYaw = Math.atan2(faceX - at.x, -(faceZ - at.z)); // yaw 0 faces three -Z, positive toward +X
+    if (target) {
+      const dx = target.x - at.x;
+      const dz = target.z - at.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.04) {
+        moved = Math.min(d, WALK * dt);
+        at.x += (dx / d) * moved;
+        at.z += (dz / d) * moved;
+        if (d > 0.25) wantYaw = Math.atan2(dx, -dz); // look where she is going, until the last step
+      } else if (prelude) {
+        if (target.wave) nextGesture = 'wave';
+        route.shift();
+      }
+    }
+    const turn = Math.atan2(Math.sin(wantYaw - at.yaw), Math.cos(wantYaw - at.yaw));
+    at.yaw += Math.max(-4 * dt, Math.min(4 * dt, turn));
+    pose.x = at.x;
     pose.y = floorY;
-    pose.z = spot.z;
-    // Face the board (and so the user, who is on its other side). avatar yaw: 0 faces three -Z, positive toward +X.
-    pose.yaw = Math.atan2(centre.x - spot.x, -(centre.z - spot.z));
+    pose.z = at.z;
+    pose.yaw = at.yaw;
+    pose.speed01 = dt > 0 ? Math.min(1, moved / dt / WALK) : 0;
+    pose.metres = moved;
     pose.gesture = nextGesture;
     nextGesture = '';
     attendBoardFor = Math.max(0, attendBoardFor - dt);
@@ -203,6 +282,20 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
       const m = bestMove(game.board, human, record, () => 0);
       if (m) reachFor(m.from.r, m.from.c); // she indicates the piece she means
       return m ? { suggestion: m.text, because: m.reason, board: boardText(game.board) } : { note: 'The user has no legal move.' };
+    }
+    if (name === 'come_here' || name === 'stand_in_front' || name === 'walk_around') {
+      if (!at.known || !beforeGame) return { status: 'failed', reason: 'You are at the table for the game now; you stay there.' };
+      // Never closer than talking distance; the stroll stays in front of the user and ends back with them.
+      route = name === 'walk_around' ? [near(2.3, 1.0), near(3.1, 0.2, true), near(2.4, -1.1), near(1.5, 0, true)] : [near(1.3)];
+      return { status: 'started' };
+    }
+    if (name === 'wave') {
+      nextGesture = 'wave';
+      return { status: 'done' };
+    }
+    if (name === 'start_game') {
+      const r = startGame ? startGame() : 'unavailable';
+      return r === 'started' ? { status: 'started', note: 'The board is being set between you and you are putting on your gown and crown. Say a few words, then it is their move.' } : { status: 'failed', reason: r === 'already' ? 'The game is already going.' : 'A game cannot be started right now.' };
     }
     if (name === 'get_board') return { board: boardText(game.board), to_move: game.phase !== 'play' ? game.phase : game.turn === human ? 'the user (Gold)' : 'you (Violet)', user_duel_record: record.summary() };
     return { error: 'unknown tool' };
@@ -246,10 +339,7 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
       const options = (connectionType) => ({
         agentId: id,
         connectionType,
-        clientTools: {
-          suggest_move: () => JSON.stringify(toolResult('suggest_move')),
-          get_board: () => JSON.stringify(toolResult('get_board')),
-        },
+        clientTools: Object.fromEntries(TOOLS.map((t) => [t.name, () => JSON.stringify(toolResult(t.name))])),
         onConnect: () => log('connected (' + connectionType + ')'),
         onDisconnect: (d) => {
           log('disconnected' + (d && d.reason ? ': ' + d.reason + (d.message ? ' ' + d.message : '') : ''));
@@ -683,7 +773,20 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
     /** True if she can talk in any way at all in this browser. */
     canSpeak: () => voice.state() === 'live' || builtIn.available(),
 
+    /** Put on the court gown and crown (once). */
+    dress() {
+      wantDress = true;
+    },
+    /** She is in the room, before any game: say hello. */
+    arrived() {
+      report('You have just appeared in the room, in everyday clothes, facing a visitor. There is no game yet. Say hello in one short sentence.', true, "Sim: Hi, I'm Sim.");
+    },
+    /** Send her somewhere before the game (used by tests and the no-voice fallback). */
+    go: (name) => toolResult(name),
+    get position() { return { x: at.x, z: at.z, yaw: at.yaw, walking: route.length > 0, dressed }; },
+
     gameStarted() {
+      wantDress = true;
       report(`A new game has started. You are Violet, the user is Gold and moves first. Their record in duels so far: ${record.summary()}. Say hello in a few words and tell them it is their move. Do not explain the rules unless they ask.${boardNow()}`, true, "Sim: Move a piece one square. Archers and swordsmen can attack a neighbour. Hit my monarch to win. You first.");
     },
 

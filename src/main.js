@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=e1feae8';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=e1feae8';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=e1feae8';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=af4bf79';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=af4bf79';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=af4bf79';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=e1feae8';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=e1feae8';
-import { createCombat, INLINE_ARENA } from './combat.js?v=e1feae8';
-import { chooseMove } from './ai.js?v=e1feae8';
-import { createSim } from './sim.js?v=e1feae8';
-import { cleanCode, makeCode, openRoom } from './net.js?v=e1feae8';
-import { VERSION } from './version.js?v=e1feae8';
+} from './rules.js?v=af4bf79';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=af4bf79';
+import { createCombat, INLINE_ARENA } from './combat.js?v=af4bf79';
+import { chooseMove } from './ai.js?v=af4bf79';
+import { createSim } from './sim.js?v=af4bf79';
+import { cleanCode, makeCode, openRoom } from './net.js?v=af4bf79';
+import { VERSION } from './version.js?v=af4bf79';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=e1feae8';
+} from './audio.js?v=af4bf79';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -307,6 +307,7 @@ const sim = createSim({
   getGame: () => game,
   human: 0,
   say: (text) => toast(text),
+  startGame: () => startGameHere(),
 });
 const simPlays = () => vsComputer && !online;
 let simGreeted = -1;
@@ -401,6 +402,9 @@ let game = createGame();
 let menu = true;
 let floorBased = false;
 let placing = false;
+// In AR Sim is met before any game: she is in the room in everyday clothes, walks and talks, and
+// the board only appears (and she only dresses for court) when the player asks to play.
+let prelude = false;
 let xrKind = null;
 let needSeat = false;
 const _seatQ = new THREE.Quaternion();
@@ -700,7 +704,7 @@ function applyScenery() {
   if (xrKind === 'ar') {
     diorama.visible = false;
     room.visible = false;
-    board.visible = !placing;
+    board.visible = !placing && !prelude;
     scene.background = null;
     renderer.setClearColor(0x000000, 0);
   } else if (xrKind === 'vr') {
@@ -710,9 +714,9 @@ function applyScenery() {
     scene.background = new THREE.Color(0x100e0c);
     renderer.setClearColor(0x100e0c, 1);
   } else {
-    diorama.visible = true;
+    diorama.visible = !prelude;
     room.visible = false;
-    board.visible = true;
+    board.visible = !prelude;
     scene.background = new THREE.Color(0x100e0c);
     renderer.setClearColor(0x100e0c, 1);
   }
@@ -938,7 +942,11 @@ function handlePick(data) {
     exitXR();
     return;
   }
-  if (menu || placing) return;
+  if (data?.action === 'play') {
+    startGameHere();
+    return;
+  }
+  if (menu || placing || prelude) return;
   if (game.phase === 'over') {
     if (data?.action === 'again') pressAgain();
     return;
@@ -1027,6 +1035,48 @@ const exitPlaque = (() => {
   board.add(mesh);
   return mesh;
 })();
+// Before the game a PLAY plaque floats at the player's lower right: the game can always be started
+// by pointing at it, whether or not Sim's voice is working.
+const playPlaque = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 192;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#2f6b3a';
+  g.beginPath();
+  g.roundRect(4, 4, 504, 184, 40);
+  g.fill();
+  g.lineWidth = 8;
+  g.strokeStyle = '#f0d48a';
+  g.stroke();
+  g.fillStyle = '#fff4dc';
+  g.font = '700 84px Cinzel, Palatino, Georgia, serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('PLAY', 256, 100);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.1), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }));
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+})();
+const _playFwd = new THREE.Vector3();
+function placePlayPlaque() {
+  const show = renderer.xr.isPresenting && prelude;
+  if (show && !playPlaque.visible) {
+    const cam = renderer.xr.getCamera();
+    cam.getWorldPosition(_cam);
+    cam.getWorldDirection(_playFwd);
+    _playFwd.y = 0;
+    if (_playFwd.lengthSq() < 1e-4) _playFwd.set(0, 0, -1);
+    _playFwd.normalize();
+    playPlaque.position.copy(_cam).addScaledVector(_playFwd, 0.6).addScaledVector(new THREE.Vector3(-_playFwd.z, 0, _playFwd.x), 0.45);
+    playPlaque.position.y -= 0.42;
+    playPlaque.lookAt(_cam.x, _cam.y - 0.1, _cam.z);
+  }
+  playPlaque.visible = show;
+}
 function exitXR() {
   const session = renderer.xr.getSession();
   if (session) session.end().catch(() => {});
@@ -1038,7 +1088,8 @@ function exitXR() {
 const _exitHome = { position: exitPlaque.position.clone(), rotation: exitPlaque.rotation.clone() };
 const _exitFwd = new THREE.Vector3();
 function placeExitPlaque() {
-  const fighting = renderer.xr.isPresenting && combatView;
+  // Also before the game, when there is no board to hang it on.
+  const fighting = renderer.xr.isPresenting && (combatView || prelude);
   if (fighting && exitPlaque.parent === board) {
     const cam = renderer.xr.getCamera();
     cam.getWorldPosition(_cam);
@@ -1075,6 +1126,8 @@ $('btn-exit').addEventListener('click', () => {
 
 function pickWithRay() {
   if (exitPlaque.visible && raycaster.intersectObject(exitPlaque, false).length) return { action: 'exit' };
+  if (playPlaque.visible && raycaster.intersectObject(playPlaque, false).length) return { action: 'play' };
+  if (prelude) return null;
   if (game.phase === 'over') {
     const hits = raycaster.intersectObjects(pickables, true);
     for (const hit of hits) {
@@ -1192,6 +1245,41 @@ function seatInFront(xrFrame) {
   needSeat = false;
 }
 
+function beginPrelude() {
+  prelude = true;
+  placing = false;
+  menu = false;
+  board.visible = false;
+  applyScenery();
+  updateHUD();
+  sim.arrived();
+}
+
+// "Let's play": the board is set between the player and Sim, at table height and turned so the
+// player's side faces them; Sim walks to her side of it and puts on her gown and crown.
+function startGameHere() {
+  if (!prelude) return 'already';
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  cam.getWorldPosition(_cam);
+  const her = sim.position;
+  _fwd.set(her.x - _cam.x, 0, her.z - _cam.z);
+  // Toward her if she is in front of the player; otherwise simply where the player is looking.
+  if (_fwd.lengthSq() < 0.25) cam.getWorldDirection(_fwd);
+  _fwd.y = 0;
+  if (_fwd.lengthSq() < 1e-4) _fwd.set(0, 0, -1);
+  _fwd.normalize();
+  board.position.copy(_cam).addScaledVector(_fwd, 0.75);
+  board.position.y = renderer.xr.isPresenting && floorBased ? 0.72 : _cam.y - 0.6;
+  board.quaternion.identity();
+  faceBoardToward(_cam.x, _cam.z);
+  prelude = false;
+  applyScenery();
+  updateHUD();
+  playSfx('start');
+  simGreet();
+  return 'started';
+}
+
 function beginPlacement() {
   placing = true;
   menu = false;
@@ -1244,6 +1332,8 @@ async function enterXR(kind) {
       board.quaternion.identity();
       needSeat = true;
       simGreet();
+    } else if (simPlays()) {
+      beginPrelude();
     } else {
       beginPlacement();
     }
@@ -1265,6 +1355,7 @@ function onSessionEnd() {
   if (game.phase === 'over' && fallEpoch === -1) setTimeout(() => game.phase === 'over' && showGameOver(), 0);
   xrKind = null;
   placing = false;
+  prelude = false;
   hitTestSource = null;
   hitTestRequested = false;
   if (!wasFighting) {
@@ -1551,6 +1642,7 @@ function frame(t, xrFrame) {
   tabletop.turnSprite.visible = renderer.xr.isPresenting && !combatView;
   placeExitPlaque();
   exitPlaque.visible = renderer.xr.isPresenting && !placing;
+  placePlayPlaque();
 
   updateHitTest(xrFrame);
   if (renderer.xr.isPresenting && xrKind === 'vr') seatInFront(xrFrame);
@@ -1562,7 +1654,7 @@ function frame(t, xrFrame) {
   tabletop.update(dt, fadeSphere.position);
   // Sim stands on the floor: the headset's own floor when it gives one, otherwise table height below the board.
   board.getWorldPosition(_simAt);
-  sim.update(dt, { visible: simPlays() && board.visible && !combatView && !placing, floorY: renderer.xr.isPresenting && floorBased ? 0 : _simAt.y - 0.95 });
+  sim.update(dt, { prelude, visible: simPlays() && (prelude || board.visible) && !combatView && !placing, floorY: renderer.xr.isPresenting && floorBased ? 0 : _simAt.y - 0.95 });
   updateHands();
   if (combat.isActive()) combat.update(dt, input);
 
@@ -1667,6 +1759,12 @@ window.addEventListener('keyup', (event) => {
 });
 
 btnPlay.addEventListener('click', () => voiceThenStart(() => {
+  // ?prelude=1 tries the meet-her-first flow on a flat screen (it is how AR always starts).
+  if (new URLSearchParams(location.search).has('prelude') && simPlays()) {
+    controls.enabled = true;
+    beginPrelude();
+    return;
+  }
   menu = false;
   controls.enabled = true;
   updateHUD();
@@ -2024,4 +2122,4 @@ if (false) {
 }
 
 // For automated checks and for poking at the game from the browser console.
-window.crownfall = { THREE, get game() { return game; }, sim, camera, controls, pick: (data) => handlePick(data), get toast() { return toastEl.textContent; } };
+window.crownfall = { startGameHere, get prelude() { return prelude; }, board, THREE, get game() { return game; }, sim, camera, controls, pick: (data) => handlePick(data), get toast() { return toastEl.textContent; } };
