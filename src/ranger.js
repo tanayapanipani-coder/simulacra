@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=a82fff1';
-import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=a82fff1';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=1de04b4';
+import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=1de04b4';
 
 // Battle-worn medieval soldiers, shared by the board miniatures and the
 // duel enemies. Realistic proportions and materials: smooth-shaded plate over
@@ -126,12 +126,12 @@ function materialsFor(palette) {
     steelDouble: std({ color: palette.steel, metalness: 0.62, roughness: 0.4, envMapIntensity: 1.5, map: steelMap, side: THREE.DoubleSide }),
     blade: std({ color: 0xc8ccd3, metalness: 0.95, roughness: 0.2, map: steelMap }),
     mail: std({ color: 0x8b8e93, metalness: 0.6, envMapIntensity: 1.4, roughness: 0.45, map: mailTex(), bumpMap: asBump(mailTex()), bumpScale: 1.6 }),
-    cloth: std({ color: palette.cloth, roughness: 0.95, map: clothTex(), bumpMap: asBump(clothTex()), bumpScale: 0.6 }),
+    cloth: std({ color: palette.cloth, roughness: 0.95, map: clothTex() }),
     clothDouble: std({ color: palette.cloth, roughness: 0.95, map: clothTex(), side: THREE.DoubleSide }),
     clothDark: std({ color: palette.clothDark, roughness: 0.95, map: clothTex() }),
-    gambeson: std({ color: palette.gambeson, roughness: 0.92, map: clothTex(), bumpMap: asBump(clothTex()), bumpScale: 1.2 }),
+    gambeson: std({ color: palette.gambeson, roughness: 0.92, map: clothTex() }),
     trim: std({ color: palette.trim, metalness: 0.75, roughness: 0.42, map: steelMap }),
-    leather: std({ color: palette.leather, roughness: 0.78, map: leatherTex(), bumpMap: asBump(leatherTex()), bumpScale: 0.8 }),
+    leather: std({ color: palette.leather, roughness: 0.78, map: leatherTex() }),
     leatherDark: std({ color: 0x1e1712, roughness: 0.82, map: leatherTex() }),
     wood: std({ color: 0x3a281a, roughness: 0.72, map: woodTex() }),
     feather: std({ color: 0x8a8580, roughness: 0.9, side: THREE.DoubleSide }),

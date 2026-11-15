@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { buildRanger, RANGER_PALETTES } from './ranger.js?v=a82fff1';
-import { createRig } from './rig.js?v=a82fff1';
-import { asBump, leatherTex, steelRough, steelTex, woodTex } from './textures.js?v=a82fff1';
+import { buildRanger, RANGER_PALETTES } from './ranger.js?v=1de04b4';
+import { createRig } from './rig.js?v=1de04b4';
+import { leatherTex, steelRough, steelTex, woodTex } from './textures.js?v=1de04b4';
 
 const MINI_SCALE = 0.045;
 
@@ -51,7 +51,7 @@ function wm() {
     blade: new THREE.MeshStandardMaterial({ color: 0xd0d4da, metalness: 0.96, roughness: 0.18, map: steelMap, roughnessMap: steelRough() }),
     steelDark: new THREE.MeshStandardMaterial({ color: 0x55575d, metalness: 0.85, roughness: 0.42, map: steelMap }),
     brass: new THREE.MeshStandardMaterial({ color: 0x8c6d36, metalness: 0.8, roughness: 0.4, map: steelMap }),
-    grip: new THREE.MeshStandardMaterial({ color: 0x2a1c13, roughness: 0.8, map: leatherTex(), bumpMap: asBump(leatherTex()), bumpScale: 1 }),
+    grip: new THREE.MeshStandardMaterial({ color: 0x2a1c13, roughness: 0.8, map: leatherTex() }),
     wood: new THREE.MeshStandardMaterial({ color: 0x3e2a1b, roughness: 0.65, map: woodTex() }),
     woodPale: new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.7, map: woodTex() }),
     string: new THREE.MeshStandardMaterial({ color: 0x2e2822, roughness: 0.9 }),
