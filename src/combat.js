@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=23810cb';
+import { clashBlurb } from './rules.js?v=11cf795';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=23810cb';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=23810cb';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=23810cb';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=23810cb';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=23810cb';
+} from './pieces.js?v=11cf795';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=11cf795';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=11cf795';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=11cf795';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=11cf795';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -688,7 +688,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       // or controller is already there with hand tracking).
       const glove = bow.userData.glove;
       if (glove) {
-        glove.visible = gripMode !== 'hand' && draw > 0.02;
+        glove.visible = gripMode === 'screen' && draw > 0.02;
         glove.position.copy(_nockL);
       }
       setBowString(bow, _nockL);
@@ -881,7 +881,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       const power = Math.max(draw, drawPeak);
       if (drawPeak > draw) _nockL.copy(_peakNock);
       drawPeak = 0;
-      if (power > 0.15) {
+      if (power > 0.2) {
         draw = power;
         // Fly along the drawn arrow: from the nock through the grip.
         bow.localToWorld(_nockW.copy(_nockL));
@@ -916,38 +916,45 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     stringMat.emissiveIntensity = stringHeld ? 1.6 : nearString ? 0.9 : 0;
   }
 
-  // Two controllers: the bow is held in the right one and the left one
-  // pulls the string. Releasing the left grip is what looses the arrow.
+  // Two controllers, same as the headset build: the bow stays in the right
+  // hand. The left grip catches the string and draws it; letting that grip
+  // go is what looses the arrow. The right grip never fires.
   function poseFromControllers(dt) {
-    const leftGrip = hooks.rightGrip?.();
-    const leftRay = hooks.rightHand?.();
-    if (!leftGrip || !leftRay) return;
-    leftGrip.getWorldPosition(_gripPos);
-    // The bow faces where the left controller points and stands upright,
-    // leaning a little with the wrist's roll. (Following the controller's
-    // handle tilted it 40-60 degrees forward on Quest controllers.)
-    leftRay.getWorldQuaternion(_q2);
-    _fwdW.copy(_negZ).applyQuaternion(_q2).normalize();
-    _y.set(0, 1, 0).lerp(_upW.set(0, 1, 0).applyQuaternion(_q2), 0.3);
+    const bowGrip = hooks.rightGrip?.();
+    const bowRay = hooks.rightHand?.();
+    if (!bowGrip || !bowRay) return;
+    bowGrip.getWorldPosition(_gripPos);
+    bow.position.copy(_gripPos);
+    bow.visible = true;
+
+    const stringGrip = hooks.leftGrip?.();
+    const pulling = !!(hooks.leftHand?.()?.userData.squeezing);
+    if (stringGrip) stringGrip.getWorldPosition(_pullW);
+
+    // At rest the bow follows the right controller. While the string is
+    // held it lies on the line between the hands, so the arrow flies from
+    // the string hand out through the bow.
+    bowRay.getWorldQuaternion(_q2);
+    const handsAim = stringHeld && stringGrip;
+    if (handsAim) _fwdW.subVectors(_gripPos, _pullW);
+    else _fwdW.copy(_negZ).applyQuaternion(_q2);
+    if (_fwdW.lengthSq() < 1e-6) _fwdW.set(0, 0, -1);
+    _fwdW.normalize();
+    _y.set(0, 1, 0).lerp(_upW.set(0, 1, 0).applyQuaternion(_q2), handsAim ? 0.15 : 0.3);
     _y.addScaledVector(_fwdW, -_y.dot(_fwdW));
     if (_y.lengthSq() < 1e-6) _y.set(0, 0, 1).addScaledVector(_fwdW, -_fwdW.z);
     _y.normalize();
     _zW.copy(_fwdW).negate();
     _xW.crossVectors(_y, _zW);
+    if (_xW.lengthSq() < 1e-6) _xW.set(1, 0, 0);
+    _xW.normalize();
+    _y.crossVectors(_zW, _xW).normalize();
     _basis.makeBasis(_xW, _y, _zW);
     bow.quaternion.setFromRotationMatrix(_basis);
-    bow.position.copy(_gripPos);
-    bow.visible = true;
     bow.updateMatrixWorld(true);
 
-    const rightGrip = hooks.leftGrip?.();
-    const selecting = !!hooks.leftSelecting?.();
-    if (rightGrip) {
-      rightGrip.getWorldPosition(_pullW);
-      pullString(_pullW, selecting, 0.3, dt);
-    } else if (stringHeld) {
-      pullString(_pullW, false, 0.3, dt);
-    }
+    if (stringGrip) pullString(_pullW, pulling, 0.5, dt);
+    else if (stringHeld) pullString(_pullW, false, 0.5, dt);
     glowString();
   }
 

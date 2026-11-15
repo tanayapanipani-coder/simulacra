@@ -55,7 +55,7 @@ const boneKey = (name) => {
   return n.replace(/^mixamorig/, '');
 };
 
-const body = { ready: false, bones: {}, rest: {}, leg: 0.85, phase: 0, walk: 0, headYaw: 0, headPitch: 0, gesture: '', gestureT: 0, jaw: [], blink: [], blinkAt: 2, jawNow: 0, kind: 'none' };
+const body = { sit: 0, thigh: 0.42, model: null, modelY: 0, ready: false, bones: {}, rest: {}, leg: 0.85, phase: 0, walk: 0, headYaw: 0, headPitch: 0, gesture: '', gestureT: 0, jaw: [], blink: [], blinkAt: 2, jawNow: 0, kind: 'none' };
 
 function setWorldQuaternion(bone, q) {
   bone.parent.getWorldQuaternion(q2);
@@ -136,7 +136,11 @@ function fitAvatar(model, kind) {
   if (body.ready && b.lFoot) {
     const len = pos(b.lThigh).distanceTo(pos(b.lCalf)) + pos(b.lCalf).distanceTo(pos(b.lFoot));
     if (len > 0.3 && len < 1.4) body.leg = len;
+    const thigh = pos(b.lThigh).distanceTo(pos(b.lCalf));
+    if (thigh > 0.15 && thigh < 0.7) body.thigh = thigh;
   }
+  body.model = model;
+  body.modelY = model.position.y;
   body.kind = kind;
 }
 
@@ -230,7 +234,8 @@ function loadAvatar() {
  * Pose the character for this frame.
  *   a       { x, y, z } feet position in three.js space; yaw (radians, 0 faces three -Z, positive
  *           turns toward +X); speed01 (0..1 of walking speed); gesture ('' or wave | nod |
- *           shake_head | shrug | point, set for one frame to start it); metres moved this frame
+ *           shake_head | shrug | point, set for one frame to start it); metres moved this frame;
+ *           sitting (true while seated)
  *   level   0..1 loudness of her voice right now (drives the jaw)
  *   lookAt  THREE.Vector3 the head turns toward (the user's eyes, or something she is attending to)
  *   pointAt optional THREE.Vector3 the 'point' gesture reaches toward
@@ -264,6 +269,23 @@ function animate(dt, a, level, lookAt, pointAt) {
   hang('rUpperArm', 'rForearm', right);
   turn('lForearm', right, 0.24);
   turn('rForearm', right, 0.24);
+
+  // Sitting: thighs level, shins down, hips lowered by a thigh's length so the feet stay on the floor,
+  // hands resting on the lap. Blended in and out over about half a second.
+  body.sit = (body.sit || 0) + Math.max(-dt * 2.2, Math.min(dt * 2.2, (a.sitting ? 1 : 0) - (body.sit || 0)));
+  const sit = body.sit * body.sit * (3 - 2 * body.sit);
+  if (body.model) body.model.position.y = body.modelY - sit * (body.thigh || 0.42) * 0.96;
+  if (sit > 0.001) {
+    turn('lThigh', right, 1.5 * sit);
+    turn('rThigh', right, 1.5 * sit);
+    turn('lCalf', right, -1.5 * sit);
+    turn('rCalf', right, -1.5 * sit);
+    // Hands down onto the lap, not held out in front.
+    turn('lUpperArm', right, 0.12 * sit);
+    turn('rUpperArm', right, 0.12 * sit);
+    turn('lForearm', right, 0.5 * sit);
+    turn('rForearm', right, 0.5 * sit);
+  }
 
   // Walk cycle driven by the ground actually covered, so the feet do not slide.
   const moving = a.speed01 > 0.06 ? 1 : 0;

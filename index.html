@@ -41,10 +41,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Outfit:wght@380;500;640&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="src/style.css?v=23810cb" />
+    <link rel="stylesheet" href="src/style.css?v=11cf795" />
   </head>
   <body>
     <div id="boot"><div><b>CROWNFALL</b><br>Loading…</div></div>
+    <script>
+      // Optional: if the browser refuses the worker, the game still runs.
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+    </script>
     <div id="overlay">
       <div id="hurt"></div>
       <div id="fade"><p id="fade-text"></p></div>
@@ -66,7 +70,7 @@
       <p id="toast" class="hidden"></p>
 
       <section id="title">
-        <p class="eyebrow">WebXR tabletop</p>
+        <p class="eyebrow">WebXR tabletop · <span id="version">v1</span></p>
         <h1>Crownfall</h1>
         <p class="lede">A five-by-five court. Archers on the wings, swords beside the crown. Take the enemy monarch and the court is yours.</p>
         <ul>
@@ -160,6 +164,6 @@
         <button id="btn-move" type="button" class="hidden">Move board</button>
       </div>
     </div>
-    <script type="module" src="src/main.js?v=23810cb"></script>
+    <script type="module" src="src/main.js?v=11cf795"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=23810cb';
-import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=23810cb';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=11cf795';
+import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=11cf795';
 
 // Battle-worn medieval soldiers, shared by the board miniatures and the
 // duel enemies. Realistic proportions and materials: smooth-shaded plate over
@@ -248,14 +248,68 @@ function kettleHat(m, S) {
   return head;
 }
 
-function crown(m, S) {
+// Royal regalia, the same bright gold for both courts so the monarch is
+// unmistakable; the jewels are in the court's colour.
+const regaliaCache = new Map();
+function regalia(palette) {
+  if (regaliaCache.has(palette)) return regaliaCache.get(palette);
+  const gem = palette.field === '#5c1513' ? 0xc0182a : 0x2a4cd8;
+  const r = {
+    gold: new THREE.MeshStandardMaterial({ color: 0xe0ad3c, metalness: 1, roughness: 0.24, emissive: 0x6a4410, emissiveIntensity: 0.55, map: steelTex() }),
+    gem: new THREE.MeshStandardMaterial({ color: gem, metalness: 0.2, roughness: 0.1, emissive: gem, emissiveIntensity: 0.6 }),
+    ermine: new THREE.MeshStandardMaterial({ color: 0xece6da, roughness: 0.95, map: clothTex() }),
+    spot: new THREE.MeshBasicMaterial({ color: 0x111111 }),
+    glow: new THREE.MeshBasicMaterial({ color: palette.field === '#5c1513' ? 0xffc35a : 0xa98bff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  };
+  regaliaCache.set(palette, r);
+  return r;
+}
+
+// A tall, closed crown: a jewelled band, eight fleur points with pearls,
+// two arches meeting under an orb and cross. About twice the height of the
+// helm it sits on, so it reads from across the table.
+function crown(r, S) {
   const c = new THREE.Group();
-  part(c, new THREE.CylinderGeometry(0.142, 0.142, 0.04, S, 1, true), m.trim, [0, 0.33, 0]);
+  const R = 0.17;
+  part(c, new THREE.CylinderGeometry(R, R * 0.96, 0.1, S * 2, 1, true), r.gold, [0, 0.36, 0]);
+  part(c, new THREE.TorusGeometry(R, 0.014, 6, S * 2), r.gold, [0, 0.31, 0], [Math.PI / 2, 0, 0]);
+  part(c, new THREE.TorusGeometry(R * 1.01, 0.012, 6, S * 2), r.gold, [0, 0.41, 0], [Math.PI / 2, 0, 0]);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    part(c, new THREE.ConeGeometry(0.018, 0.06, 4), m.trim, [Math.sin(a) * 0.142, 0.375, Math.cos(a) * 0.142]);
+    const x = Math.sin(a) * R;
+    const z = Math.cos(a) * R;
+    // Alternate tall and short points.
+    const h = i % 2 ? 0.1 : 0.17;
+    part(c, new THREE.ConeGeometry(0.03, h, 4), r.gold, [x, 0.41 + h / 2, z], [0, a, 0]);
+    part(c, new THREE.SphereGeometry(0.02, 8, 6), r.ermine, [x, 0.41 + h + 0.012, z]);
+    // A jewel set in the band under each point.
+    part(c, new THREE.SphereGeometry(0.022, 8, 6), r.gem, [Math.sin(a) * (R + 0.006), 0.36, Math.cos(a) * (R + 0.006)], [0, 0, 0], [1, 1.2, 0.6]);
   }
+  // Arches and the orb and cross on top.
+  for (const ry of [0, Math.PI / 2]) {
+    part(c, new THREE.TorusGeometry(R * 0.92, 0.012, 6, S * 2, Math.PI), r.gold, [0, 0.41, 0], [0, ry, 0]);
+  }
+  part(c, new THREE.SphereGeometry(0.04, 12, 8), r.gold, [0, 0.41 + R * 0.92 + 0.03, 0]);
+  part(c, new THREE.BoxGeometry(0.016, 0.09, 0.016), r.gold, [0, 0.41 + R * 0.92 + 0.11, 0]);
+  part(c, new THREE.BoxGeometry(0.06, 0.016, 0.016), r.gold, [0, 0.41 + R * 0.92 + 0.12, 0]);
+  // Oversized, growing up from where the band sits on the helm.
+  const k = 1.35;
+  c.scale.setScalar(k);
+  c.position.y = 0.31 * (1 - k);
   return c;
+}
+
+// A gold sceptre with a jewelled head, along +y with the grip at the origin.
+function sceptre(r) {
+  const s = new THREE.Group();
+  part(s, new THREE.CylinderGeometry(0.016, 0.02, 0.62, 8), r.gold, [0, 0.12, 0]);
+  part(s, new THREE.SphereGeometry(0.045, 12, 8), r.gold, [0, 0.45, 0]);
+  part(s, new THREE.SphereGeometry(0.03, 10, 8), r.gem, [0, 0.5, 0]);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    part(s, new THREE.ConeGeometry(0.014, 0.07, 4), r.gold, [Math.sin(a) * 0.035, 0.52, Math.cos(a) * 0.035], [Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5]);
+  }
+  return s;
 }
 
 // ------------------------------------------------------------- weapons ---
@@ -374,11 +428,17 @@ export function buildRanger({ kind, palette, pose = 'mini', eyeColor = null }) {
   const body = new THREE.Group();
   root.add(body);
 
+  const r = kind === 'king' ? regalia(palette) : null;
   if (isMini) {
-    // A dark stone plinth with a band of the court's metal.
+    // A dark stone plinth with a band of the court's metal; the monarch's is
+    // rimmed in gold and ringed with a soft glow in the court's colour.
     part(root, new THREE.CylinderGeometry(0.4, 0.44, 0.09, 24), m.stone, [0, 0.045, 0]);
-    part(root, new THREE.TorusGeometry(0.405, 0.018, 6, 32), m.trim, [0, 0.09, 0], [Math.PI / 2, 0, 0]);
+    part(root, new THREE.TorusGeometry(0.405, 0.018, 6, 32), r ? r.gold : m.trim, [0, 0.09, 0], [Math.PI / 2, 0, 0]);
     part(root, new THREE.CylinderGeometry(0.36, 0.4, 0.04, 24), m.stone, [0, 0.11, 0]);
+    if (r) {
+      part(root, new THREE.TorusGeometry(0.36, 0.016, 6, 32), r.gold, [0, 0.13, 0], [Math.PI / 2, 0, 0]);
+      part(root, new THREE.RingGeometry(0.42, 0.62, 40), r.glow, [0, 0.02, 0], [-Math.PI / 2, 0, 0]);
+    }
     body.position.y = 0.13;
   }
 
@@ -401,7 +461,10 @@ export function buildRanger({ kind, palette, pose = 'mini', eyeColor = null }) {
   // Tabard skirt: front and back panels in the court's colour (a long robe
   // for the monarch, a quilted skirt for archers).
   if (kind === 'king') {
-    part(pelvis, raggedHem(new THREE.CylinderGeometry(0.22, 0.36, 0.9, S, 1, true), S, 0.03), m.clothDouble, [0, -0.45, 0], [0, 0, 0], [1, 1, 0.85]);
+    // A full-length royal robe with an ermine hem.
+    part(pelvis, new THREE.CylinderGeometry(0.22, 0.38, 0.9, S, 1, true), m.clothDouble, [0, -0.45, 0], [0, 0, 0], [1, 1, 0.85]);
+    part(pelvis, new THREE.CylinderGeometry(0.385, 0.4, 0.08, S, 1, true), r.ermine, [0, -0.88, 0], [0, 0, 0], [1, 1, 0.86]);
+    part(pelvis, new THREE.BoxGeometry(0.07, 0.86, 0.02), r.ermine, [0, -0.45, 0.25], [-0.16, 0, 0]);
   } else if (armoured) {
     for (const t0 of [-0.85, Math.PI - 0.85]) {
       part(pelvis, raggedHem(new THREE.CylinderGeometry(0.215, 0.29, 0.52, S, 1, true, t0, 1.7), S, 0.05), m.clothDouble, [0, -0.27, 0], [0, 0, 0], [1, 1, 0.84]);
@@ -429,7 +492,15 @@ export function buildRanger({ kind, palette, pose = 'mini', eyeColor = null }) {
 
   // Head on a neck joint
   const neck = kind === 'archer' ? kettleHat(m, S) : greatHelm(m, S, isMini ? null : eyeColor, kind === 'sword');
-  if (kind === 'king') neck.add(crown(m, S));
+  if (r) {
+    neck.add(crown(r, S));
+    // An ermine mantle over the shoulders: white fur with black tails.
+    part(spine, new THREE.CylinderGeometry(0.2, 0.33, 0.2, S * 2), r.ermine, [0, 0.52, 0], [0, 0, 0], [1, 1, 0.82]);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      part(spine, new THREE.BoxGeometry(0.018, 0.04, 0.01), r.spot, [Math.sin(a) * 0.29, 0.47, Math.cos(a) * 0.24], [0, a, 0]);
+    }
+  }
   neck.position.y = 0.61;
   spine.add(neck);
 
@@ -473,7 +544,7 @@ export function buildRanger({ kind, palette, pose = 'mini', eyeColor = null }) {
     joints.cape = part(spine, cloak, m.clothDouble, [0, 0.58 - len / 2, -0.03], [0.05, 0, 0], [1, 1, 0.85]);
   }
 
-  if (isMini) poseMini(root, kind, m, S, armR, armL);
+  if (isMini) poseMini(root, kind, m, S, armR, armL, r);
   else armSoldier(kind, m, S, joints);
 
   // Fuse the rigid parts on each joint into one mesh per material: a knight
@@ -486,7 +557,7 @@ export function buildRanger({ kind, palette, pose = 'mini', eyeColor = null }) {
 
   // Every part casts and catches shadows in the duels.
   root.traverse((o) => {
-    if (o.isMesh && o.material !== m.slit) {
+    if (o.isMesh && o.material !== m.slit && !o.material.transparent) {
       o.castShadow = true;
       o.receiveShadow = true;
     }
@@ -540,7 +611,7 @@ function mergeStatic(root, keep) {
 
 // Static display pose for the board miniatures. Weapons are placed in figure
 // space and then attached to the hands so they keep that placement.
-function poseMini(root, kind, m, S, right, left) {
+function poseMini(root, kind, m, S, right, left, r) {
   right.arm.rotation.set(0, 0, -0.22);
   right.fore.rotation.set(-1.15, 0, 0.35);
   left.arm.rotation.set(0, 0, 0.16);
@@ -563,7 +634,8 @@ function poseMini(root, kind, m, S, right, left) {
     place(arrow, right.hand, handPos(right.hand).add(new THREE.Vector3(0, 0.1, 0.02)), [0.1, 0, 0.15]);
     root.userData.bow = bow;
   } else {
-    const sword = buildSword(m, S);
+    // The monarch holds a sceptre; everyone else a sword.
+    const sword = r ? sceptre(r) : buildSword(m, S);
     place(sword, right.hand, handPos(right.hand).add(new THREE.Vector3(0, 0.02, 0.02)), [-0.12, 0, 0.18]);
     if (kind === 'sword') {
       const shield = buildShield(m);

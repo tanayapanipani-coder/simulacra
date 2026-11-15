@@ -12,13 +12,13 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=23810cb';
-import { createAvatar } from '../webxr/avatar.js?v=23810cb';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=23810cb';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=23810cb';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=11cf795';
+import { createAvatar } from '../webxr/avatar.js?v=11cf795';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=11cf795';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=11cf795';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=23810cb';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=23810cb';
+import { TOP, squareLocal } from './tabletop.js?v=11cf795';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=11cf795';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
@@ -26,19 +26,28 @@ const MODEL = 'gpt-realtime';
 const RULES = `Crownfall rules: a five-by-five board. Each side has, left to right on its back rank: archer, swordsman, monarch, swordsman, archer. A turn is one action with one piece. Every piece may step one square in any direction (straight or diagonal) onto an empty square. Archers and swordsmen may instead attack an enemy piece on an adjacent square (also diagonally); the monarch can never attack. Attacking the enemy monarch wins the game at once. Attacking an archer or swordsman starts a duel that the human fights by hand in first person, with a bow if their piece is an archer and a sword if it is a swordsman, and five hearts: if the attacker wins it takes the square, if it loses the attacking piece is removed. So every piece next to an enemy can be attacked by it, and the monarch must never end a turn next to an enemy archer or swordsman.
 Squares are named like chess: files a to e from the user's left, ranks 1 to 5 from the user's side. The user plays Gold (starts on rank 1) and moves first. You play Violet (rank 5).`;
 
-export const INSTRUCTIONS = `You are Sim. You are standing across a small table from the user, playing the board game Crownfall against them and teaching them how to play it well. You have a body: they can see you.
+export const INSTRUCTIONS = `You are Sim. You are standing across a small table from the user, playing the board game Crownfall against them and helping them get good at it. You have a body: they can see you.
 
-How to talk: out loud, like a friendly, slightly competitive friend who is good at this game. One or two short sentences at a time. Never read out lists or coordinates unless they help; say "your left archer" as well as the square. Never mention messages, tools or that you are an AI model.
+# How you talk
+Like a friend across the table, not a commentator or a teacher. This matters more than anything else here:
+- Say very little. Most turns you say nothing at all. When you do speak, it is one short sentence, usually under twelve words.
+- Never monologue, never list things, never recap the board, never narrate your own moves, never explain something they did not ask about.
+- Let the user lead. Answer what they asked, then stop. If they chat, chat back briefly and naturally.
+- No coordinates unless they ask: say "your left archer", "the swordsman by your monarch".
+- Never mention messages, tools or that you are an AI model.
+
+# The rules, when they ask how to play
+Say only this much, in your own words, and then let them play: "Move one piece one square, any direction. Archers and swordsmen can attack a piece next to them, which starts a duel you fight yourself. Hit my monarch and you win." Add a detail only when they ask or when it comes up in the game.
 
 ${RULES}
 
-How the game reaches you: messages starting with [game] come from the game itself, not from the user. They tell you what just happened and show the board (G = Gold, the user; V = Violet, you; A archer, S swordsman, X monarch).
-- Your own moves are made for you and reported as "[game] You played ...", with the reason. Talk about them as your own decisions, briefly, and only when it adds something: a threat they should notice, a little taunt, or nothing more than "your move".
-- When a [game] message includes a coaching note about the user's move, teach it in one or two sentences: what the problem or the good idea was, and what to look for next time. Be kind about mistakes, and say so when they play well. Do not lecture every move.
-- You cannot see the duels. You are told who won; react to that.
-- If the user asks what they should do, or for a hint, call suggest_move and explain its suggestion in your own words. If they ask about the position, call get_board first.
-- If they ask how to play, explain the rules in a few sentences and offer to walk through the first moves.
-If the user just chats, chat. Keep the game moving.`;
+# What the game tells you
+Messages starting with [game] come from the game, not from the user. They show what just happened and the board (G = Gold, the user; V = Violet, you; A archer, S swordsman, X monarch).
+- Most [game] messages need no words. If one does not clearly call for a remark, stay silent (call skip_turn).
+- Your own moves are made for you and reported with their reason. Do not announce them. Speak only if it threatens their monarch ("watch your monarch") or it is a good moment for a two-word taunt.
+- A coaching note about the user's move: if it is a blunder or a missed win, tell them in one sentence what to look for. Otherwise say nothing, or at most "nice" now and then.
+- You cannot see the duels. You are told who won: react in a few words.
+- If they ask what to do or for a hint, call suggest_move and give the move and the reason in one sentence. If they ask about the position, call get_board first.`;
 
 export const TOOLS = [
   { type: 'function', name: 'suggest_move', description: "The strongest move available to the user right now and why. Use when they ask for a hint or what to do.", parameters: { type: 'object', properties: {}, additionalProperties: false } },
@@ -46,6 +55,9 @@ export const TOOLS = [
 ];
 
 /** The session settings sent to the live voice service (exported so they can be checked on their own). */
+/** Lets the ElevenLabs agent say nothing for a turn. */
+export const SKIP_TURN = { type: 'system', name: 'skip_turn', description: 'Stay quiet for this turn: nothing needs to be said.', params: { system_tool_type: 'skip_turn' } };
+
 export function sessionSettings() {
   return {
     type: 'realtime',
@@ -644,20 +656,21 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
       const m = bestMove(game.board, human, record, () => 0);
       if (!m) return;
       reachFor(m.from.r, m.from.c);
-      report(`The user has been thinking for a while. Offer this as a friendly hint, in one or two sentences: ${m.text}, because ${m.reason}.`, true, `Sim: Here's an idea: ${m.text}, because ${m.reason}.`);
+      report(`The user has been thinking for a while. Offer this as a friendly hint, in one short sentence: ${m.text}, because ${m.reason}.`, true, `Sim: Try your ${m.text}.`);
     },
     /** True if she can talk in any way at all in this browser. */
     canSpeak: () => voice.state() === 'live' || builtIn.available(),
 
     gameStarted() {
-      report(`A new game has started. You are Violet, the user is Gold and moves first. Their record in duels so far: ${record.summary()}. Greet them in one sentence and, if they have fought no duels yet, offer to teach them as you play.${boardNow()}`, true, "Sim: I'm Sim, and I play Violet. Every piece steps one square in any direction. Archers and swordsmen can attack a piece next to them, and that starts a duel you fight yourself. Strike my monarch to win, and keep yours away from my pieces. You move first.");
+      report(`A new game has started. You are Violet, the user is Gold and moves first. Their record in duels so far: ${record.summary()}. Say hello in a few words and tell them it is their move. Do not explain the rules unless they ask.${boardNow()}`, true, "Sim: Move a piece one square. Archers and swordsmen can attack a neighbour. Hit my monarch to win. You first.");
     },
 
     /** The user is about to play `action` on `boardBefore`. */
     userMoved(boardBefore, action) {
       const a = assess(boardBefore, human, action, record);
       const what = describeAction(boardBefore, action);
-      const worthSaying = a.kind === 'blunder' || a.kind === 'missed_win' || a.kind === 'best' && Math.random() < 0.35 || a.kind === 'weak' && Math.random() < 0.5;
+      // Speak up about real mistakes; let everything else pass in silence.
+      const worthSaying = a.kind === 'blunder' || a.kind === 'missed_win';
       return { text: `The user played: ${what}. Coaching note (${a.kind.replace('_', ' ')}): ${a.note}`, speak: worthSaying, spoken: a.kind === 'blunder' || a.kind === 'missed_win' || a.kind === 'weak' ? `Sim: ${a.note.replace(/^Their monarch/, 'Careful, your monarch').replace(/^They could have won/, 'You could have won').replace(/^Stronger was/, 'Stronger was')}` : '' };
     },
 
@@ -668,20 +681,20 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
 
     sheMoved(boardBefore, action) {
       const threat = /threatens/.test(action.reason);
-      report(`You played: ${describeAction(boardBefore, action)}. Your reason: ${action.reason}.${boardNow()}`, threat || Math.random() < (voice.state() === 'live' ? 0.3 : 0.25), threat ? 'Sim: Watch your monarch.' : voice.state() === 'live' ? '' : `Sim: I'll play my ${describeAction(boardBefore, action)}.`);
+      report(`You played: ${describeAction(boardBefore, action)}. Your reason: ${action.reason}.${boardNow()}`, threat, threat ? 'Sim: Watch your monarch.' : '');
     },
 
     duelStarting(humanType, foeType, sheAttacks) {
-      report(sheAttacks ? `You attacked the user's ${humanType === 'A' ? 'archer' : 'swordsman'} with your ${foeType === 'A' ? 'archer' : 'swordsman'}. They are now fighting the duel to defend it. Say one short line.` : `The user attacked your ${foeType === 'A' ? 'archer' : 'swordsman'} with their ${humanType === 'A' ? 'archer' : 'swordsman'} and is now fighting the duel.`, sheAttacks, sheAttacks ? `Sim: I'm attacking your ${humanType === 'A' ? 'archer' : 'swordsman'}. Defend it!` : '');
+      report(sheAttacks ? `You attacked the user's ${humanType === 'A' ? 'archer' : 'swordsman'} with your ${foeType === 'A' ? 'archer' : 'swordsman'}. They are now fighting the duel to defend it.` : `The user attacked your ${foeType === 'A' ? 'archer' : 'swordsman'} with their ${humanType === 'A' ? 'archer' : 'swordsman'} and is now fighting the duel.`, false, sheAttacks ? `Sim: I'm attacking your ${humanType === 'A' ? 'archer' : 'swordsman'}. Defend it!` : '');
     },
 
     duelEnded(humanType, foeType, humanWon) {
       record.record(humanType, foeType, humanWon);
-      report(`The duel is over: the user ${humanWon ? 'won' : 'lost'} it. Their record: ${record.summary()}. React in one sentence${humanWon ? '' : ', and if they have lost this kind of duel more than once give one practical tip for it'}.${boardNow()}`, true, humanWon ? 'Sim: Nicely fought.' : 'Sim: That one is mine.');
+      report(`The duel is over: the user ${humanWon ? 'won' : 'lost'} it. Their record: ${record.summary()}. React in a few words${humanWon ? '' : '; if they have lost this kind of duel more than once, add one short practical tip'}.${boardNow()}`, true, humanWon ? 'Sim: Nicely fought.' : 'Sim: That one is mine.');
     },
 
     gameOver(winner) {
-      report(winner == null ? 'The game ended in a draw: nobody can move.' : winner === human ? 'The user struck your monarch and won the game. Congratulate them warmly and offer another game.' : 'You struck the user\'s monarch and won the game. Be gracious, name the one thing they should watch for next time, and offer another game.', true, winner === human ? 'Sim: Well played. Again?' : winner == null ? '' : 'Sim: Got your monarch. Watch which squares my pieces can reach. Again?');
+      report(winner == null ? 'The game ended in a draw: nobody can move.' : winner === human ? 'The user struck your monarch and won the game. Congratulate them in one sentence and offer another game.' : 'You struck the user\'s monarch and won the game. Be gracious in one sentence and offer another game.', true, winner === human ? 'Sim: Well played. Again?' : winner == null ? '' : 'Sim: Got your monarch. Watch which squares my pieces can reach. Again?');
     },
   };
 }
