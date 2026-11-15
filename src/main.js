@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=97c404a';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=97c404a';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=97c404a';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=097ac9a';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=097ac9a';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=097ac9a';
 import {
   advanceTurn,
   createGame,
@@ -9,12 +9,12 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=97c404a';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=97c404a';
-import { createCombat, INLINE_ARENA } from './combat.js?v=97c404a';
-import { chooseMove } from './ai.js?v=97c404a';
-import { createSim } from './sim.js?v=97c404a';
-import { cleanCode, makeCode, openRoom } from './net.js?v=97c404a';
+} from './rules.js?v=097ac9a';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=097ac9a';
+import { createCombat, INLINE_ARENA } from './combat.js?v=097ac9a';
+import { chooseMove } from './ai.js?v=097ac9a';
+import { createSim } from './sim.js?v=097ac9a';
+import { cleanCode, makeCode, openRoom } from './net.js?v=097ac9a';
 import {
   isMuted,
   playDefeat,
@@ -24,7 +24,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=97c404a';
+} from './audio.js?v=097ac9a';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -1128,6 +1128,7 @@ async function enterXR(kind) {
       // The tracking origin is not always where the head is. Wait for a real
       // pose, then turn Gold (the side you move) to the near edge.
       seatWait = 2;
+      sim.resetPlace();
       simGreet();
     } else {
       beginPlacement();
@@ -1429,6 +1430,9 @@ function frame(t, xrFrame) {
   if (seatWait > 0 && renderer.xr.isPresenting && !combatView) {
     seatWait -= dt;
     seatAtTable();
+    if (seatWait <= 0) sim.standStill();
+  } else if (!renderer.xr.isPresenting) {
+    sim.standStill();
   }
   movePlayer(dt);
   if (input.primaryPressed || mouseMag > 34 || dragSpeed > 32) input.slash = true;
