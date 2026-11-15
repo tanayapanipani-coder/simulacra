@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=af4bf79';
+import { clothTex, steelTex } from './textures.js?v=fc49220';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -9,7 +9,8 @@ import { clothTex, steelTex } from './textures.js?v=af4bf79';
 //     exactly (skin of the face, neck and hands, and hair untouched);
 //   - puffed sleeve-heads and the skirt's fall as meshes on
 //     her bones;
-//   - a gold crown with a jewel on her brow.
+//   - a gold crown resting on top of her head, fitted so it never passes
+//     into her head or hair.
 
 // Colours of the gown, in linear light (after the reference: a wine gown
 // under a dark green velvet bodice, gold-laced, with embroidered bands).
@@ -159,6 +160,100 @@ function circlet() {
   return g;
 }
 
+// The crown and her head are treated as solid. The ring is sized to her
+// skull (an oval, with room for her hair), then lowered from above her head
+// until its band first touches her head or hair, and left resting there, so
+// no part of either passes into the other. Measured on the bind pose and
+// fixed to the head bone, so it stays put however she moves.
+function fitCrown(model, crown) {
+  let mesh = null;
+  model.traverse((o) => {
+    if (o.isSkinnedMesh && !mesh) mesh = o;
+  });
+  if (!mesh) return;
+  const skel = mesh.skeleton;
+  const headIdx = skel.bones.findIndex((b) => /head$/i.test(String(b.name).replace(/_/g, ' ').trim()));
+  if (headIdx < 0) return;
+  // Her head and scalp, and her hair, in the bind pose (cm, y up, front +z).
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const collect = (test) => {
+    const want = new Set(mats.map((m, i) => (test(String(m?.name || '')) ? i : -1)).filter((i) => i >= 0));
+    const ids = new Set();
+    for (const g of geo.groups) {
+      if (!want.has(g.materialIndex)) continue;
+      for (let i = g.start; i < g.start + g.count; i++) ids.add(geo.index ? geo.index.getX(i) : i);
+    }
+    return [...ids].map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix));
+  };
+  const scalp = collect((n) => /head/i.test(n));
+  const solid = scalp.concat(collect((n) => /opacity/i.test(n))); // head + hair
+  if (!scalp.length) return;
+  let top = -Infinity;
+  for (const p of scalp) top = Math.max(top, p.y);
+  // Size the ring to her skull (not the bun) about 6 cm below its top.
+  const at = top - 6;
+  let xMax = 0;
+  let zMin = Infinity;
+  let zMax = -Infinity;
+  for (const p of scalp) {
+    if (Math.abs(p.y - at) > 0.75) continue;
+    xMax = Math.max(xMax, Math.abs(p.x));
+    zMin = Math.min(zMin, p.z);
+    zMax = Math.max(zMax, p.z);
+  }
+  if (!xMax) return;
+  const cz = (zMin + zMax) / 2;
+  const rx = xMax * 1.05 + 0.6; // room for the hair over the scalp
+  const rz = ((zMax - zMin) / 2) * 1.05 + 0.6;
+  // The crown model: band inner radius ~0.094 and height ~0.04 with rims
+  // (metres), round +Y. Scaled to the oval in centimetres.
+  const inner = 0.094;
+  const heightScale = ((rx + rz) / 2 / inner) * 0.8;
+  const bandH = 0.04 * heightScale;
+  // Lower the ring from above until a head or hair point inside the band's
+  // height reaches its inner wall. Try it level and tilted back (front low,
+  // back raised to clear the bun), and keep the snuggest fit.
+  const q = new THREE.Quaternion();
+  const invQ = new THREE.Quaternion();
+  const rel = new THREE.Vector3();
+  const clear = (y, tilt, dz) => {
+    invQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -tilt);
+    for (const p of solid) {
+      rel.set(p.x, p.y - y, p.z - cz - dz).applyQuaternion(invQ);
+      if (Math.abs(rel.y) > bandH / 2) continue;
+      if ((rel.x / rx) ** 2 + (rel.z / rz) ** 2 >= 1) return false;
+    }
+    return true;
+  };
+  // Tilts both ways: with her hair in a bun the back of a crown usually
+  // slips in below it while the front rests on top of her head.
+  let best = null;
+  for (let deg = -36; deg <= 30; deg += 3) {
+    for (const dz of [-1.5, 0, 1.5, 3]) {
+      const tilt = (deg * Math.PI) / 180;
+      let y = top + 6;
+      while (y > top - 18 && clear(y - 0.25, tilt, dz)) y -= 0.25;
+      // The lower it settles the snugger it sits; a gentle tilt is fine, a
+      // steep one less so.
+      const score = y + Math.abs(deg) * 0.16;
+      if (!best || score < best.score) best = { y, tilt, dz, score };
+    }
+  }
+  // A turn of +tilt about x raises the back (-z) of the ring.
+  q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), best.tilt);
+  const bindM = new THREE.Matrix4().compose(
+    new THREE.Vector3(0, best.y, cz + best.dz),
+    q,
+    new THREE.Vector3(rx / inner, heightScale, rz / inner),
+  );
+  // A child of the head bone: bone-local = boneInverse x bind-pose placement.
+  crown.matrixAutoUpdate = false;
+  crown.matrix.multiplyMatrices(skel.boneInverses[headIdx], bindM);
+  skel.bones[headIdx].add(crown);
+}
+
 const _Y = new THREE.Vector3(0, 1, 0);
 // A mesh built along +Y (centred), stretched from point a to b.
 function along(geoFn, mat, a, b, cover = 1, from = 0) {
@@ -279,7 +374,6 @@ export function dressMedieval(avatar) {
   if (!head || !neck) return;
   const inv = root.matrixWorld.clone().invert();
   const local = (o) => o.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-  const headP = local(head);
   const neckP = local(neck);
   // The model faces +Z in the avatar's own space.
   const place = (obj, p, bone) => {
@@ -288,8 +382,8 @@ export function dressMedieval(avatar) {
     obj.updateMatrixWorld(true);
     bone.attach(obj);
   };
-  const c = circlet();
-  place(c, headP.clone().add(new THREE.Vector3(0, 0.15, 0.0)), head);
+  // The crown rests on top of her head (see fitCrown).
+  fitCrown(model, circlet());
 
   const b = avatar.body.bones;
   const metal = steel();

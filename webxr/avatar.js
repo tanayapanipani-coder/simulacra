@@ -7,7 +7,7 @@
 //   await avatar.load();
 //   avatar.animate(dt, { x, y, z, yaw, speed01, gesture, metres }, voiceLevel, lookAtVec3);
 
-export function createAvatar({ THREE, FBXLoader, scene, assetBase = './avatar/', height: wantedHeight = 1.7, placeholder = false, lite = false }) {
+export function createAvatar({ THREE, FBXLoader, scene, assetBase = './avatar/', height: wantedHeight = 1.7, placeholder = false, lite = false, mocap = true }) {
 const q1 = new THREE.Quaternion();
 const q2 = new THREE.Quaternion();
 const UP = new THREE.Vector3(0, 1, 0);
@@ -141,6 +141,13 @@ function fitAvatar(model, kind) {
   }
   body.model = model;
   body.modelY = model.position.y;
+  // Which way the head bone's own axes point when the face looks straight ahead (she faces +Z here),
+  // so the gaze can be steered whatever pose a recorded motion has put the head in.
+  if (b.head) {
+    avatarRoot.updateMatrixWorld(true);
+    const face = new THREE.Vector3(0, 0, 1).applyQuaternion(avatarRoot.getWorldQuaternion(new THREE.Quaternion()));
+    body.headForward = face.applyQuaternion(b.head.getWorldQuaternion(new THREE.Quaternion()).invert());
+  }
   body.kind = kind;
 }
 
@@ -174,15 +181,15 @@ function loadAvatar() {
     const tex = new THREE.TextureLoader();
     // `lite` (headsets and phones): the 4K textures are drawn down to 1K and the normal maps are
     // left out. On a standalone headset the full set costs more memory and frame time than it shows.
-    const map = (name, srgb) => {
+    const map = (name, srgb, size = 1024) => {
       let t;
       if (!lite) t = tex.load(assetBase + name);
       else {
         t = new THREE.Texture();
         new THREE.ImageLoader().load(assetBase + name, (img) => {
           const c = document.createElement('canvas');
-          c.width = c.height = 1024;
-          c.getContext('2d').drawImage(img, 0, 0, 1024, 1024);
+          c.width = c.height = size;
+          c.getContext('2d').drawImage(img, 0, 0, size, size);
           t.image = c;
           t.needsUpdate = true;
         });
@@ -204,7 +211,7 @@ function loadAvatar() {
             if (made[name]) return made[name];
             let m;
             if (name.includes('opacity')) m = new THREE.MeshStandardMaterial({ map: map('f006_opacity_color.png', true), transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.75 });
-            else if (name.includes('head')) m = new THREE.MeshStandardMaterial({ map: map('f006_head_color.png', true), ...(lite ? {} : { normalMap: map('f006_head_normal.png', false) }), roughness: 0.7 });
+            else if (name.includes('head')) m = new THREE.MeshStandardMaterial({ map: map('f006_head_color.png', true, 2048), normalMap: map('f006_head_normal.png', false, 1024), roughness: 0.62 });
             else m = new THREE.MeshStandardMaterial({ map: map('f006_body_color.png', true), ...(lite ? {} : { normalMap: map('f006_body_normal.png', false) }), roughness: 0.8 });
             m.name = old.name;
             made[name] = m;
@@ -214,6 +221,7 @@ function loadAvatar() {
             if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(material) : material(o.material);
           });
           fitAvatar(model, 'rocketbox');
+          if (mocap) loadMocap(model).catch((e) => console.warn('motion capture not loaded; using the simple built-in motion', e));
         } catch (e) {
           console.warn('avatar setup failed, using the placeholder', e);
           placeholderAvatar();
@@ -228,6 +236,121 @@ function loadAvatar() {
       },
     );
   });
+}
+
+// ---------------------------------------------------------------- recorded human motion
+
+// Motion-capture clips from the Rocketbox library, recorded for this character's own skeleton
+// (see backend/tools/convert-animations.mjs). Standing still she cycles through idle takes
+// (breathing, shifting weight, looking around); walking plays a real gait at the pace she is
+// actually moving; a wave, nod, shrug or head shake is a real one; and while her voice is sounding
+// she gestures the way a person talking does. Everything cross-fades, so nothing snaps.
+async function loadMocap(model) {
+  const [meta, bin] = await Promise.all([
+    fetch(assetBase + 'animations.json').then((r) => (r.ok ? r.json() : Promise.reject(new Error('animations.json ' + r.status)))),
+    fetch(assetBase + 'animations.bin').then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('animations.bin ' + r.status)))),
+  ]);
+  const mixer = new THREE.AnimationMixer(model);
+  const byRole = {};
+  const all = [];
+  const nb = meta.bones.length;
+  for (const c of meta.clips) {
+    const times = new Float32Array(c.frames);
+    for (let f = 0; f < c.frames; f++) times[f] = f / meta.fps;
+    const packed = new Int16Array(bin, c.quats, c.frames * nb * 4);
+    const tracks = [];
+    for (let b = 0; b < nb; b++) {
+      const values = new Float32Array(c.frames * 4);
+      for (let f = 0; f < c.frames; f++) for (let k = 0; k < 4; k++) values[f * 4 + k] = packed[(f * nb + b) * 4 + k] / 32767;
+      tracks.push(new THREE.QuaternionKeyframeTrack(meta.bones[b] + '.quaternion', times, values));
+    }
+    tracks.push(new THREE.VectorKeyframeTrack('Bip01.position', times, new Float32Array(bin.slice(c.root, c.root + c.frames * 12))));
+    const clip = new THREE.AnimationClip(c.name, (c.frames - 1) / meta.fps, tracks);
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.enabled = true;
+    action.setEffectiveWeight(0);
+    action.play();
+    const entry = { name: c.name, role: c.role, action, duration: clip.duration, speed: c.speed, weight: 0, target: 0 };
+    all.push(entry);
+    (byRole[c.role] = byRole[c.role] || []).push(entry);
+  }
+  if (!byRole.idle || !byRole.walk) throw new Error('the animation pack has no idle or walk');
+  body.mocap = { mixer, all, byRole, base: null, baseRole: '', baseFor: 0, shot: null, talk: 0, pointT: -1 };
+}
+
+function playMocap(dt, a, level, pointAt) {
+  const m = body.mocap;
+  if (body.model) body.model.position.y = body.modelY; // the seated clips carry their own height
+  const pick = (role, not) => {
+    const list = m.byRole[role] || m.byRole.idle;
+    const others = list.length > 1 ? list.filter((e) => e !== not) : list;
+    return others[Math.floor(Math.random() * others.length)];
+  };
+
+  // What she is doing underneath any gesture: sitting, walking, talking, or simply standing.
+  const sounding = level > 0.05;
+  m.talk += ((sounding ? 1 : 0) - m.talk) * Math.min(1, dt * (sounding ? 5 : 1.1));
+  const role = a.sitting ? 'sit' : a.speed01 > 0.08 ? 'walk' : m.talk > 0.5 && m.byRole.talk ? 'talk' : 'idle';
+  m.baseFor += dt;
+  // A new take when what she is doing changes, and a different take of the same thing before the
+  // current one runs out, so that standing still never loops visibly.
+  if (role !== m.baseRole || (role !== 'walk' && m.base && m.baseFor > m.base.duration - 0.7)) {
+    const next = pick(role, role === m.baseRole ? m.base : null);
+    if (next !== m.base || role !== m.baseRole) {
+      if (next !== m.base) next.action.time = role === 'idle' && !m.baseRole ? Math.random() * next.duration * 0.5 : 0;
+      m.base = next;
+    }
+    m.baseRole = role;
+    m.baseFor = m.base.action.time;
+  }
+  if (role === 'walk') m.base.action.timeScale = Math.max(0.6, Math.min(1.5, (a.speed01 * 0.9) / (m.base.speed || 1.2)));
+
+  // A gesture on top: the whole recorded take, faded in and out.
+  if (a.gesture === 'point') m.pointT = 0;
+  else if (a.gesture && m.byRole[a.gesture] && !a.sitting) {
+    const take = pick(a.gesture, m.shot ? m.shot.entry : null);
+    take.action.time = 0;
+    take.action.timeScale = 1;
+    m.shot = { entry: take, t: 0 };
+  }
+  let over = 0;
+  if (m.shot) {
+    m.shot.t += dt;
+    const left = m.shot.entry.duration - m.shot.t;
+    over = Math.min(1, m.shot.t / 0.3, Math.max(0, left / 0.45));
+    if (left <= 0 || a.speed01 > 0.08) {
+      if (a.speed01 > 0.08) over = 0;
+      if (left <= 0 || over === 0) m.shot = m.shot && left > 0 && over > 0 ? m.shot : null;
+    }
+  }
+
+  let total = 0;
+  for (const e of m.all) {
+    e.target = m.shot && e === m.shot.entry ? over : e === m.base ? 1 - over : 0;
+    const rate = dt / (e.role === 'walk' || m.baseRole === 'walk' ? 0.22 : 0.4);
+    e.weight += Math.max(-rate, Math.min(rate, e.target - e.weight));
+    total += e.weight;
+  }
+  for (const e of m.all) e.action.setEffectiveWeight(total > 0 ? e.weight / total : e === m.base ? 1 : 0);
+  m.mixer.update(dt);
+
+  // Reaching toward a spot (a square on a board): turn the recorded arm pose toward it and back.
+  if (m.pointT >= 0) {
+    m.pointT += dt;
+    const ease = Math.min(1, m.pointT * 4) * Math.min(1, Math.max(0, (1.8 - m.pointT) * 4));
+    const u = body.bones.rUpperArm;
+    const l = body.bones.rForearm;
+    if (u && l && pointAt && ease > 0) {
+      const from = u.getWorldPosition(new THREE.Vector3());
+      const current = l.getWorldPosition(new THREE.Vector3()).sub(from).normalize();
+      const want = pointAt.clone().sub(from).normalize();
+      const axis = new THREE.Vector3().crossVectors(current, want);
+      const sin = axis.length();
+      if (sin > 1e-4) turn('rUpperArm', axis.normalize(), Math.atan2(sin, current.dot(want)) * ease);
+    }
+    if (m.pointT > 1.8) m.pointT = -1;
+  }
 }
 
 /**
@@ -259,12 +382,16 @@ function animate(dt, a, level, lookAt, pointAt) {
   for (const [mesh, i] of body.blink) mesh.morphTargetInfluences[i] = blink;
 
   if (!body.ready) return;
-  for (const key in body.bones) body.bones[key].quaternion.copy(body.rest[key]);
-  avatarRoot.updateMatrixWorld(true);
-
   const forward = new THREE.Vector3(Math.sin(a.yaw), 0, -Math.cos(a.yaw));
   const right = new THREE.Vector3().crossVectors(forward, UP).normalize();
   const left = right.clone().negate();
+  let nod = 0;
+  let shake = 0;
+  // Recorded human motion when it has loaded; the simple built-in motion until then, or without it.
+  if (body.mocap) playMocap(dt, a, level, pointAt);
+  else {
+  for (const key in body.bones) body.bones[key].quaternion.copy(body.rest[key]);
+  avatarRoot.updateMatrixWorld(true);
   hang('lUpperArm', 'lForearm', left);
   hang('rUpperArm', 'rForearm', right);
   turn('lForearm', right, 0.24);
@@ -302,8 +429,6 @@ function animate(dt, a, level, lookAt, pointAt) {
   turn('rUpperArm', right, s * swing * 0.6 * body.walk);
 
   // Gestures.
-  let nod = 0;
-  let shake = 0;
   if (body.gesture) {
     body.gestureT += dt;
     const t = body.gestureT;
@@ -331,9 +456,29 @@ function animate(dt, a, level, lookAt, pointAt) {
     else if (body.gesture === 'shake_head') shake = Math.sin(t * 9) * 0.35 * ease;
     if (t > 1.8) body.gesture = '';
   }
+  } // end of the built-in motion
 
-  // Look at the user (or straight ahead while walking somewhere else).
-  if (body.bones.head) {
+  // With recorded motion the head already moves by itself: steer its actual facing most of the way
+  // toward what she is looking at, within what a neck can do, so she holds eye contact while the
+  // rest of her body idles, talks or waves.
+  if (body.mocap && body.bones.head && body.headForward) {
+    const head = body.bones.head;
+    const headPos = head.getWorldPosition(new THREE.Vector3());
+    const now = body.headForward.clone().applyQuaternion(head.getWorldQuaternion(q1)).normalize();
+    const want = lookAt.clone().sub(headPos).normalize();
+    // Not further round than about 65 degrees from the way her body faces, and not craning up or down.
+    const bodyYaw = Math.atan2(forward.x, forward.z);
+    let yaw = Math.atan2(want.x, want.z) - bodyYaw;
+    yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+    const walkingAway = Math.abs(yaw) > 1.6;
+    yaw = walkingAway ? 0 : Math.max(-1.1, Math.min(1.1, yaw));
+    const pitch = walkingAway ? 0 : Math.max(-0.45, Math.min(0.45, Math.asin(Math.max(-1, Math.min(1, want.y)))));
+    want.set(Math.sin(bodyYaw + yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(bodyYaw + yaw) * Math.cos(pitch));
+    body.gaze = body.gaze || now.clone();
+    body.gaze.lerp(want, Math.min(1, dt * 5)).normalize();
+    const fix = new THREE.Quaternion().setFromUnitVectors(now, now.clone().lerp(body.gaze, 0.8).normalize());
+    setWorldQuaternion(head, fix.multiply(head.getWorldQuaternion(q1)));
+  } else if (body.bones.head) {
     const headPos = body.bones.head.getWorldPosition(new THREE.Vector3());
     const to = lookAt.clone().sub(headPos);
     let yaw = Math.atan2(to.x, to.z) - Math.atan2(forward.x, forward.z);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=af4bf79';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=af4bf79';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=af4bf79';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=fc49220';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=fc49220';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=fc49220';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,14 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=af4bf79';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=af4bf79';
-import { createCombat, INLINE_ARENA } from './combat.js?v=af4bf79';
-import { chooseMove } from './ai.js?v=af4bf79';
-import { createSim } from './sim.js?v=af4bf79';
-import { cleanCode, makeCode, openRoom } from './net.js?v=af4bf79';
-import { VERSION } from './version.js?v=af4bf79';
+} from './rules.js?v=fc49220';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=fc49220';
+import { createCombat, INLINE_ARENA } from './combat.js?v=fc49220';
+import { chooseMove } from './ai.js?v=fc49220';
+import { createSim } from './sim.js?v=fc49220';
+import { createCastle } from './castle.js?v=fc49220';
+import { cleanCode, makeCode, openRoom } from './net.js?v=fc49220';
+import { VERSION } from './version.js?v=fc49220';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +26,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=af4bf79';
+} from './audio.js?v=fc49220';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -54,8 +55,6 @@ const fadeText = $('fade-text');
 const hurtEl = $('hurt');
 const crosshair = $('crosshair');
 const corner = $('corner');
-const btnAr = $('btn-ar');
-const btnVr = $('btn-vr');
 const btnPlay = $('btn-play');
 const btnAgain = $('btn-again');
 const btnSound = $('btn-sound');
@@ -263,10 +262,14 @@ try {
 
 const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.05, 80);
 camera.position.set(0, 1.22, 0.62);
+// The title screen looks at Sundai standing, not down at a board. (Play moves the view into AR.)
+const MENU_VIEW = { from: new THREE.Vector3(0, 1.35, 0.6), at: new THREE.Vector3(0, 0.95, -1.7) };
 scene.add(camera);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.04, 0);
+camera.position.copy(MENU_VIEW.from);
+controls.target.copy(MENU_VIEW.at);
 controls.enableDamping = true;
 controls.enablePan = false;
 controls.maxPolarAngle = Math.PI / 2.2;
@@ -336,13 +339,13 @@ setInterval(() => {
 async function talkToSim() {
   const status = $('sim-status');
   if (!(await sim.canGoLive())) {
-    status.textContent = sim.canSpeak() ? 'No key: Sim will talk with the browser’s built-in voice and coach you as you play. She cannot hear you without a key.' : 'No key, and this browser has no built-in voice: Sim will coach in text.';
+    status.textContent = sim.canSpeak() ? 'Live voice is not available. Sim will still talk with the browser’s built-in voice and coach you as you play.' : 'Live voice is not available, and this browser has no built-in voice: Sim will coach in text.';
     return;
   }
   status.textContent = 'Connecting Sim’s voice…';
   const live = await sim.startVoice();
-  status.textContent = live ? 'Sim’s voice is live: just talk to her.' : `Live voice could not start (${sim.voiceProblem() || 'unknown reason'}). She will still speak her coaching, but cannot hear you. Open “Voice log” for details.`;
-  $('btn-sim').textContent = live ? 'Sim: voice on' : 'Talk to Sim';
+  status.textContent = live ? 'Sim’s voice is live: just talk to her.' : 'Live voice could not start. She will still speak her coaching, but cannot hear you.';
+  if ($('btn-sim')) $('btn-sim').textContent = live ? 'Sim: voice on' : 'Talk to Sim';
   if (live) {
     simGreeted = -1;
     if (!menu) simGreet();
@@ -354,14 +357,11 @@ async function talkToSim() {
 // to remember a separate button. The microphone prompt comes before any AR session, where it would be hidden.
 async function voiceThenStart(start) {
   unlockAudio();
+  // The camera she looks through, asked for now: in AR its permission prompt would be out of sight.
+  await sim.startCamera().catch(() => false);
   if (sim.voiceState() !== 'live' && sim.voiceState() !== 'connecting' && (await sim.canGoLive())) await talkToSim();
   start();
 }
-setInterval(() => {
-  const el = $('sim-log');
-  if (el && !el.hidden) el.textContent = `voice: ${sim.voiceState()}${sim.voiceProblem() ? ' (' + sim.voiceProblem() + ')' : ''}; heard her on the call: ${sim.heardHer() ? 'yes' : 'not yet'}\n` + sim.voiceLog().slice(-40).join('\n');
-}, 500);
-
 const fadeMat = new THREE.MeshBasicMaterial({
   color: 0x07060a,
   transparent: true,
@@ -405,6 +405,11 @@ let placing = false;
 // In AR Sim is met before any game: she is in the room in everyday clothes, walks and talks, and
 // the board only appears (and she only dresses for court) when the player asks to play.
 let prelude = false;
+// The game itself is played on a castle terrace at sunset, above a kingdom. In AR this world is
+// drawn solid around the player when the game starts, replacing the view of their room.
+const castle = createCastle();
+scene.add(castle.world);
+let inCastle = false;
 let xrKind = null;
 let needSeat = false;
 const _seatQ = new THREE.Quaternion();
@@ -654,6 +659,11 @@ function onCombatHud(info) {
   crosshair.classList.toggle('hidden', renderer.xr.isPresenting || game.phase !== 'combat');
 }
 
+let returnToAR = false;
+let sessionSwap = null;
+const savedBoardPos = new THREE.Vector3();
+const savedBoardQuat = new THREE.Quaternion();
+
 function onCombatView(enter) {
   if (enter === combatView) return;
   combatView = enter;
@@ -663,9 +673,8 @@ function onCombatView(enter) {
     savedTarget.copy(controls.target);
     savedFov = camera.fov;
     controls.enabled = false;
-    // Night fog belongs to the virtual arena; in AR it would tint the real room.
-    // Warm battlefield haze that softens the far ruins; none in AR.
-    scene.fog = xrKind === 'ar' && renderer.xr.isPresenting ? null : new THREE.FogExp2(0x5e4635, 0.024);
+    // Warm battlefield haze. An AR board session is about to become a VR fight.
+    scene.fog = new THREE.FogExp2(0x5e4635, 0.024);
     if (!renderer.xr.isPresenting) {
       camera.fov = 72;
       camera.updateProjectionMatrix();
@@ -674,6 +683,11 @@ function onCombatView(enter) {
       pitch = 0;
       camera.rotation.order = 'YXZ';
       camera.rotation.set(pitch, yaw, 0);
+    } else if (xrKind === 'ar') {
+      returnToAR = true;
+      savedBoardPos.copy(board.position);
+      savedBoardQuat.copy(board.quaternion);
+      swapSession('vr');
     }
     setMusicTension(true);
   } else {
@@ -688,6 +702,9 @@ function onCombatView(enter) {
       controls.target.copy(savedTarget);
       controls.enabled = !menu;
       controls.update();
+    } else if (returnToAR) {
+      returnToAR = false;
+      swapSession('ar');
     }
   }
   applyScenery();
@@ -695,6 +712,7 @@ function onCombatView(enter) {
 }
 
 function applyScenery() {
+  castle.world.visible = inCastle && !combatView;
   if (combatView) {
     board.visible = false;
     diorama.visible = false;
@@ -714,9 +732,10 @@ function applyScenery() {
     scene.background = new THREE.Color(0x100e0c);
     renderer.setClearColor(0x100e0c, 1);
   } else {
-    diorama.visible = !prelude;
+    // On the title screen, as when first meeting her, there is no board: only Sundai, in her own clothes.
+    diorama.visible = !prelude && !menu;
     room.visible = false;
-    board.visible = !prelude;
+    board.visible = !prelude && !menu;
     scene.background = new THREE.Color(0x100e0c);
     renderer.setClearColor(0x100e0c, 1);
   }
@@ -1272,6 +1291,9 @@ function startGameHere() {
   board.position.y = renderer.xr.isPresenting && floorBased ? 0.72 : _cam.y - 0.6;
   board.quaternion.identity();
   faceBoardToward(_cam.x, _cam.z);
+  // Into the castle: the terrace is laid on the player's own floor, its open side the way they face.
+  castle.placeAround(_cam.x, renderer.xr.isPresenting && floorBased ? 0 : board.position.y - 0.72, _cam.z, _fwd.x, _fwd.z);
+  inCastle = true;
   prelude = false;
   applyScenery();
   updateHUD();
@@ -1288,7 +1310,20 @@ function beginPlacement() {
   updateHUD();
 }
 
-async function enterXR(kind) {
+async function swapSession(kind) {
+  sessionSwap = kind;
+  const current = renderer.xr.getSession();
+  if (current) await current.end().catch(() => {});
+  sessionSwap = null;
+  await enterXR(kind, { keepPlace: true });
+  if (kind === 'ar') {
+    board.position.copy(savedBoardPos);
+    board.quaternion.copy(savedBoardQuat);
+    applyScenery();
+  }
+}
+
+async function enterXR(kind, opts = {}) {
   unlockAudio();
   if (!navigator.xr) {
     toast('This browser has no WebXR.');
@@ -1324,7 +1359,10 @@ async function enterXR(kind) {
     renderer.xr.setFoveation(1);
     await renderer.xr.setSession(session);
     hideGameOver();
-    if (kind === 'vr') {
+    if (opts.keepPlace) {
+      menu = false;
+      placing = false;
+    } else if (kind === 'vr') {
       placing = false;
       menu = false;
       // Table height above the real floor, or below the eyes without one.
@@ -1342,7 +1380,7 @@ async function enterXR(kind) {
   } catch (err) {
     console.warn(err);
     // Answering the microphone prompt can use up the tap that starting AR needs.
-    toast(sim.voiceState() === 'live' ? 'Sim can hear you now. Press Enter AR once more.' : 'The XR session was blocked.');
+    toast(sim.voiceState() === 'live' ? 'Sim can hear you now. Press Play once more.' : 'The XR session was blocked.');
     xrKind = null;
     applyScenery();
   }
@@ -1351,11 +1389,18 @@ async function enterXR(kind) {
 function onSessionEnd() {
   releaseHeld(false);
   floorBased = false;
+  if (sessionSwap) {
+    xrKind = null;
+    hitTestSource = null;
+    hitTestRequested = false;
+    return;
+  }
   const wasFighting = combatView;
   if (game.phase === 'over' && fallEpoch === -1) setTimeout(() => game.phase === 'over' && showGameOver(), 0);
   xrKind = null;
   placing = false;
   prelude = false;
+  inCastle = false;
   hitTestSource = null;
   hitTestRequested = false;
   if (!wasFighting) {
@@ -1651,10 +1696,11 @@ function frame(t, xrFrame) {
   mouseMag = 0;
   dragSpeed = 0;
 
+  if (inCastle) castle.update(now / 1000);
   tabletop.update(dt, fadeSphere.position);
   // Sim stands on the floor: the headset's own floor when it gives one, otherwise table height below the board.
   board.getWorldPosition(_simAt);
-  sim.update(dt, { prelude, visible: simPlays() && (prelude || board.visible) && !combatView && !placing, floorY: renderer.xr.isPresenting && floorBased ? 0 : _simAt.y - 0.95 });
+  sim.update(dt, { aside: menu ? 1.0 : 0, prelude: prelude || menu, visible: simPlays() && (prelude || menu || board.visible) && !combatView && !placing, floorY: renderer.xr.isPresenting && floorBased ? 0 : _simAt.y - 0.95 });
   updateHands();
   if (combat.isActive()) combat.update(dt, input);
 
@@ -1758,124 +1804,7 @@ window.addEventListener('keyup', (event) => {
   keys[event.code] = false;
 });
 
-btnPlay.addEventListener('click', () => voiceThenStart(() => {
-  // ?prelude=1 tries the meet-her-first flow on a flat screen (it is how AR always starts).
-  if (new URLSearchParams(location.search).has('prelude') && simPlays()) {
-    controls.enabled = true;
-    beginPrelude();
-    return;
-  }
-  menu = false;
-  controls.enabled = true;
-  updateHUD();
-  simGreet();
-}));
-$('btn-sim-log').addEventListener('click', () => {
-  $('sim-log').hidden = !$('sim-log').hidden;
-});
-// Getting the key onto a headset, where pasting is awkward: the headset shows a short code, the
-// computer that has the key types the code, and the key travels straight from one browser to the
-// other (the same device-to-device link online play uses; the broker only ever sees the code).
-let pairing = null;
-const pairMsg = (text) => { $('pair-msg').textContent = text; };
-const stopPairing = () => {
-  if (pairing) pairing.close();
-  pairing = null;
-};
-$('pair-receive').addEventListener('click', async () => {
-  unlockAudio();
-  stopPairing();
-  const code = makeCode();
-  pairMsg('Getting a code…');
-  try {
-    pairing = await openRoom({
-      role: 'host',
-      code: 'K' + code,
-      onStatus: (state, detail) => {
-        if (state === 'connected') pairMsg('The computer has connected. Waiting for the key…');
-        else if (state === 'error') pairMsg(detail || 'Connection problem. Try again.');
-      },
-      onMessage: (msg) => {
-        if (msg?.t !== 'key' || typeof msg.key !== 'string' || !/^sk-[\w-]{20,}$/.test(msg.key.trim())) {
-          pairMsg('What arrived did not look like an OpenAI key (it should start with sk-).');
-          pairing?.send({ t: 'key-bad' });
-          return;
-        }
-        sim.setKey(msg.key.trim());
-        pairing?.send({ t: 'key-ok' });
-        $('pair-code').hidden = true;
-        pairMsg('Key received and saved on this device.');
-        setTimeout(stopPairing, 1500);
-        talkToSim();
-      },
-    });
-    $('pair-code').textContent = code;
-    $('pair-code').hidden = false;
-    pairMsg('On your computer, open this same page, open “Key is on another device?”, type this code and paste the key.');
-  } catch (err) {
-    pairMsg(err?.message || 'Could not get a code. Check the internet connection.');
-  }
-});
-$('pair-send').addEventListener('click', async () => {
-  const code = cleanCode($('pair-code-in').value).slice(0, 5);
-  const key = $('pair-key').value.trim().replace(/^["']|["']$/g, '');
-  if (code.length !== 5) return pairMsg('Type the 5-character code shown on the headset.');
-  if (!/^sk-[\w-]{20,}$/.test(key)) return pairMsg('That does not look like an OpenAI key (it should start with sk-).');
-  stopPairing();
-  pairMsg('Connecting to the headset…');
-  let delivered = false;
-  const giveUp = setTimeout(() => { if (!delivered) pairMsg('No answer from the headset. Check the code, and that the headset is still showing it.'); }, 15000);
-  try {
-    pairing = await openRoom({
-      role: 'join',
-      code: 'K' + code,
-      onStatus: (state, detail) => {
-        if (state === 'connected') {
-          pairing.send({ t: 'key', key });
-          pairMsg('Sent. Waiting for the headset to confirm…');
-        } else if (state === 'error') pairMsg(detail?.replace('No game with that code', 'No headset is showing that code').replace('the other player is still waiting', 'the headset is still showing it') || 'Connection problem.');
-      },
-      onMessage: (msg) => {
-        if (msg?.t === 'key-ok') {
-          delivered = true;
-          clearTimeout(giveUp);
-          $('pair-key').value = '';
-          pairMsg('Delivered. The headset has the key now.');
-          setTimeout(stopPairing, 1000);
-        } else if (msg?.t === 'key-bad') pairMsg('The headset rejected it: not a valid-looking key.');
-      },
-    });
-  } catch (err) {
-    clearTimeout(giveUp);
-    pairMsg(err?.message || 'Could not connect.');
-  }
-});
-// A link can also carry the key (…/crownfall/#key=sk-…): it is saved and removed from the address at once.
-{
-  const m = /[#&]key=(sk-[\w-]{20,})/.exec(location.hash);
-  if (m) {
-    sim.setKey(m[1]);
-    history.replaceState(null, '', location.pathname + location.search);
-  }
-}
-
-// Sim's voice. The key is kept in this browser and sent only to OpenAI.
-$('sim-key-save').addEventListener('click', () => {
-  const key = $('sim-key').value.trim().replace(/^["']|["']$/g, '');
-  if (key) sim.setKey(key);
-  $('sim-key').value = '';
-  unlockAudio();
-  talkToSim();
-});
-$('btn-sim').addEventListener('click', () => {
-  unlockAudio();
-  talkToSim();
-});
-$('sim-build').textContent = 'Build ' + (typeof __BUILD__ === 'string' ? __BUILD__ : 'dev');
-sim.canGoLive().then((can) => { if (can && !sim.hasKey()) $('sim-status').textContent = 'Sim’s live voice is ready: it starts when you start a game. No key needed.'; });
-$('sim-status').textContent = sim.hasKey() ? 'A key is saved: her voice starts when you start a game.' : 'No key needed to play: Sim talks with the browser’s built-in voice and coaches you. Add an OpenAI key if you want to talk back to her.';
-btnAr.addEventListener('click', () => voiceThenStart(() => enterXR('ar')));
-btnVr.addEventListener('click', () => voiceThenStart(() => enterXR('vr')));
+btnPlay.addEventListener('click', () => voiceThenStart(() => enterXR('ar')));
 btnArMini.addEventListener('click', () => enterXR('ar'));
 btnVrMini.addEventListener('click', () => enterXR('vr'));
 btnAgain.addEventListener('click', () => {
@@ -1952,13 +1881,7 @@ async function goOnline(role, code) {
   }
 }
 
-$('btn-online').addEventListener('click', () => {
-  unlockAudio();
-  setOnlineMsg('');
-  showOnlinePanel(true);
-});
-// Back before anyone has joined closes the room, so local play works again.
-$('btn-online-back').addEventListener('click', () => {
+$('btn-online-back')?.addEventListener('click', () => {
   if (online && !opponentHere) leaveOnline(false);
   showOnlinePanel(false);
 });
@@ -2057,16 +1980,14 @@ btnSound.textContent = isMuted() ? 'Sound off' : 'Sound on';
 
 async function detectXR() {
   if (!navigator.xr) {
-    btnAr.disabled = true;
-    btnVr.disabled = true;
+    btnPlay.disabled = true;
     btnArMini.disabled = true;
     btnVrMini.disabled = true;
     return;
   }
   const ar = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
   const vr = await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
-  btnAr.disabled = !ar;
-  btnVr.disabled = !vr;
+  btnPlay.disabled = !ar;
   btnArMini.disabled = !ar;
   btnVrMini.disabled = !vr;
 }
@@ -2121,5 +2042,7 @@ if (false) {
   };
 }
 
+applyScenery(); // the title screen starts without the board
+
 // For automated checks and for poking at the game from the browser console.
-window.crownfall = { startGameHere, get prelude() { return prelude; }, board, THREE, get game() { return game; }, sim, camera, controls, pick: (data) => handlePick(data), get toast() { return toastEl.textContent; } };
+window.crownfall = { beginPrelude, castle, get inCastle() { return inCastle; }, startGameHere, get prelude() { return prelude; }, board, THREE, get game() { return game; }, sim, camera, controls, pick: (data) => handlePick(data), get toast() { return toastEl.textContent; } };

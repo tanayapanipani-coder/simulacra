@@ -1,4 +1,4 @@
-import { SIZE, inBounds } from './rules.js?v=af4bf79';
+import { SIZE, inBounds } from './rules.js?v=fc49220';
 
 // A stronger player than ai.js, and the brains behind coaching.
 //
