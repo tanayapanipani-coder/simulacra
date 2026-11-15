@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=1eff359';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=1eff359';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=1eff359';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=87779e0';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=87779e0';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=87779e0';
 import {
   advanceTurn,
   createGame,
@@ -9,13 +9,13 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=1eff359';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=1eff359';
-import { createCombat, INLINE_ARENA } from './combat.js?v=1eff359';
-import { chooseMove } from './ai.js?v=1eff359';
-import { createSim } from './sim.js?v=1eff359';
-import { cleanCode, makeCode, openRoom } from './net.js?v=1eff359';
-import { VERSION } from './version.js?v=1eff359';
+} from './rules.js?v=87779e0';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=87779e0';
+import { createCombat, INLINE_ARENA } from './combat.js?v=87779e0';
+import { chooseMove } from './ai.js?v=87779e0';
+import { createSim } from './sim.js?v=87779e0';
+import { cleanCode, makeCode, openRoom } from './net.js?v=87779e0';
+import { VERSION } from './version.js?v=87779e0';
 import {
   isMuted,
   playDefeat,
@@ -25,7 +25,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=1eff359';
+} from './audio.js?v=87779e0';
 
 const $ = (id) => document.getElementById(id);
 const versionEl = $('version');
@@ -427,6 +427,9 @@ let mouseMag = 0;
 let dragSpeed = 0;
 
 const controllers = [];
+let triggerHand = null;
+let clickHand = null;
+try { clickHand = localStorage.getItem('crownfall.clickHand'); } catch { /* keep the default */ }
 const grips = [];
 const POINTER_DROP = THREE.MathUtils.degToRad(-20);
 const _aimOrigin = new THREE.Vector3();
@@ -458,8 +461,9 @@ for (let i = 0; i < 2; i++) {
           new THREE.Vector3(0, 0, 0),
           new THREE.Vector3(0, 0, -1),
         ]),
-        new THREE.LineBasicMaterial({ color: 0xe6c27a }),
+        new THREE.LineBasicMaterial({ color: 0xe6c27a, depthTest: false, depthWrite: false, transparent: true }),
       );
+      line.renderOrder = 20;
       line.scale.z = 0.5;
       mount.add(line);
       controller.add(mount);
@@ -470,6 +474,7 @@ for (let i = 0; i < 2; i++) {
   });
   controller.addEventListener('selectstart', () => {
     controller.userData.selecting = true;
+    if (!triggerHand) triggerHand = controller;
     input.primaryDown = true;
     input.primaryPressed = true;
   });
@@ -483,9 +488,23 @@ for (let i = 0; i < 2; i++) {
     controller.userData.selecting = false;
     input.primaryDown = false;
     input.primaryReleased = true;
+    const hand = controller;
+    queueMicrotask(() => { if (triggerHand === hand) triggerHand = null; });
   });
   controller.addEventListener('select', () => {
+    if (triggerHand !== controller) return;
+    triggerHand = null;
+    const hand = controller.userData.handedness;
+    if (hand === 'left' || hand === 'right') {
+      clickHand = hand;
+      try { localStorage.setItem('crownfall.clickHand', hand); } catch { /* not stored */ }
+    }
     if (game.phase !== 'combat') onXRSelect(controller);
+    else if (exitPlaque.visible) {
+      // In a duel the trigger belongs to the weapon, except on the Exit plaque.
+      setRayFromController(controller);
+      if (raycaster.intersectObject(exitPlaque, false).length) exitXR();
+    }
   });
   scene.add(controller);
   controllers.push(controller);
@@ -545,6 +564,7 @@ const combat = createCombat({
     // Trigger or grip button: either one holds the bow string.
     rightSelecting: () => !!(findHand('right')?.userData.selecting || findHand('right')?.userData.squeezing),
     leftSelecting: () => !!(findHand('left')?.userData.selecting || findHand('left')?.userData.squeezing),
+    clickHand: () => clickHand,
     lock: (on) => crosshair.classList.toggle('locked', on),
     floorBased: () => floorBased && renderer.xr.isPresenting,
     isAR: () => xrKind === 'ar' && renderer.xr.isPresenting,
@@ -1008,6 +1028,47 @@ function exitXR() {
   if (session) session.end().catch(() => {});
 }
 
+// In a duel the board (and its Exit plaque) is out of sight, so the plaque
+// is set down at the player's lower left when the fight starts, larger, and
+// facing them: point at it and pull the trigger (or pinch) to leave.
+const _exitHome = { position: exitPlaque.position.clone(), rotation: exitPlaque.rotation.clone() };
+const _exitFwd = new THREE.Vector3();
+function placeExitPlaque() {
+  const fighting = renderer.xr.isPresenting && combatView;
+  if (fighting && exitPlaque.parent === board) {
+    const cam = renderer.xr.getCamera();
+    cam.getWorldPosition(_cam);
+    cam.getWorldDirection(_exitFwd);
+    _exitFwd.y = 0;
+    if (_exitFwd.lengthSq() < 1e-4) _exitFwd.set(0, 0, -1);
+    _exitFwd.normalize();
+    const left = new THREE.Vector3(_exitFwd.z, 0, -_exitFwd.x);
+    scene.add(exitPlaque);
+    exitPlaque.position.copy(_cam).addScaledVector(_exitFwd, 0.6).addScaledVector(left, 0.45);
+    exitPlaque.position.y -= 0.42;
+    exitPlaque.scale.setScalar(2);
+    exitPlaque.lookAt(_cam);
+  } else if (!fighting && exitPlaque.parent !== board) {
+    board.add(exitPlaque);
+    exitPlaque.position.copy(_exitHome.position);
+    exitPlaque.rotation.copy(_exitHome.rotation);
+    exitPlaque.scale.setScalar(1);
+  }
+}
+
+// The on-screen Exit: leaves AR/VR, or (on a screen) gives up any duel in
+// progress, leaves an online room and goes back to the start menu.
+$('btn-exit').addEventListener('click', () => {
+  if (renderer.xr.isPresenting) {
+    exitXR();
+    return;
+  }
+  if (game.phase === 'combat') btnYield.click();
+  if (online) leaveOnline(true);
+  menu = true;
+  updateHUD();
+});
+
 function pickWithRay() {
   if (exitPlaque.visible && raycaster.intersectObject(exitPlaque, false).length) return { action: 'exit' };
   if (game.phase === 'over') {
@@ -1018,13 +1079,11 @@ function pickWithRay() {
     }
     return null;
   }
-  // The square under the ray, not the piece standing on it. A unit in front
-  // no longer hides the tile behind it.
-  board.updateMatrixWorld(true);
-  _pickUp.set(0, 1, 0).transformDirection(board.matrixWorld);
-  board.getWorldPosition(_boardHit);
-  _boardPlane.setFromNormalAndCoplanarPoint(_pickUp, _boardHit);
-  if (!raycaster.ray.intersectPlane(_boardPlane, _boardHit)) return null;
+  // Only the board surface. Piece models are not tested, so one standing
+  // in the ray cannot change which tile is chosen.
+  const hit = raycaster.intersectObject(tabletop.boardTop, false)[0];
+  if (!hit) return null;
+  _boardHit.copy(hit.point);
   board.worldToLocal(_boardHit);
   const square = squareUnder(_boardHit.x, _boardHit.z);
   if (!square) return null;
@@ -1473,10 +1532,20 @@ function frame(t, xrFrame) {
 
   for (const controller of controllers) {
     const laser = controller.getObjectByName('laser');
-    if (laser) laser.visible = renderer.xr.isPresenting && game.phase !== 'combat';
+    if (!laser) continue;
+    laser.visible = renderer.xr.isPresenting && game.phase !== 'combat';
+    if (!laser.visible) continue;
+    const line = laser.children[0];
+    laser.updateWorldMatrix(true, false);
+    laser.getWorldPosition(_aimOrigin);
+    _aimDir.set(0, 0, -1).applyQuaternion(laser.getWorldQuaternion(_seatQ));
+    raycaster.set(_aimOrigin, _aimDir);
+    const hit = raycaster.intersectObject(tabletop.boardTop, false)[0];
+    if (line) line.scale.z = hit ? Math.max(0.05, _aimOrigin.distanceTo(hit.point)) : 1.5;
   }
   tabletop.turnSprite.visible = renderer.xr.isPresenting && !combatView;
-  exitPlaque.visible = renderer.xr.isPresenting && !combatView && !placing;
+  placeExitPlaque();
+  exitPlaque.visible = renderer.xr.isPresenting && !placing;
 
   updateHitTest(xrFrame);
   if (renderer.xr.isPresenting && xrKind === 'vr') seatInFront(xrFrame);

@@ -141,6 +141,50 @@ export function playClang() {
   playTone(180, 0.08, 'sine', 0.12, 90);
 }
 
+// A man's voice, roughly: a buzzing sawtooth with vibrato through two vowel
+// formants. 'cry' is a low, rising battle shout from the wave; 'fear' a
+// higher, falling cry when a comrade goes down.
+export function playShout(kind = 'cry') {
+  if (muted) return;
+  const c = ac();
+  const now = c.currentTime;
+  const fear = kind === 'fear';
+  const dur = fear ? 0.55 : 0.8;
+  const voices = fear ? 1 : 3;
+  for (let v = 0; v < voices; v++) {
+    const t = now + v * 0.06;
+    const base = (fear ? 240 : 125) * (0.92 + Math.random() * 0.18);
+    const o = c.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(base * (fear ? 1.15 : 0.9), t);
+    o.frequency.linearRampToValueAtTime(base * (fear ? 0.8 : 1.12), t + dur);
+    const vib = c.createOscillator();
+    vib.frequency.value = 5.5 + Math.random() * 2;
+    const vibG = c.createGain();
+    vibG.gain.value = base * 0.03;
+    vib.connect(vibG);
+    vibG.connect(o.frequency);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(fear ? 0.05 : 0.035, t + 0.06);
+    g.gain.setValueAtTime(fear ? 0.05 : 0.035, t + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    for (const [f, q] of fear ? [[850, 5], [1350, 6]] : [[650, 4], [1100, 5]]) {
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      o.connect(bp);
+      bp.connect(g);
+    }
+    g.connect(out());
+    o.start(t);
+    vib.start(t);
+    o.stop(t + dur + 0.05);
+    vib.stop(t + dur + 0.05);
+  }
+}
+
 export function playDeflect() {
   playClang();
 }

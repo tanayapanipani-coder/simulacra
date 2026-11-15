@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=1eff359';
+import { clashBlurb } from './rules.js?v=87779e0';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,16 +7,21 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=1eff359';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=1eff359';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=1eff359';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=1eff359';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=1eff359';
+} from './pieces.js?v=87779e0';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=87779e0';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=87779e0';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=87779e0';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=87779e0';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
 const TUNING = {
-  meleeQuota: 6,
+  // A wave of ten swordsmen, staggered in over about two seconds.
+  meleeQuota: 10,
+  waveStagger: [0.12, 0.32],
+  // At most this many press the attack at once; the rest hold a ring
+  // around the player and wait their turn (all of them once few are left).
+  maxEngaged: 2,
   meleeSpeed: 3.7,
   archerCount: 4,
   archerInterval: 3.05,
@@ -192,6 +197,8 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   let quota = TUNING.meleeQuota;
   let vulnerable = false;
   let spawnT = 0;
+  let nextGap = 0;
+  let shadowT = 0;
   let spawned = 0;
   let blocks = 0;
   let draw = 0;
@@ -354,22 +361,39 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
   function spawnSwordsman() {
     const mesh = createSoldier('sword', paletteForEnemy(attackerSide));
-    // From the attacking end in a loose column: each new swordsman takes a
-    // slightly different line, and later ones come on a little faster.
+    // The wave comes on as a loose, ragged line across the attacking end.
     spawned += 1;
-    const a = [0, 0.22, -0.22][(spawned - 1) % 3] + (Math.random() - 0.5) * 0.1;
-    const dist = 8.6;
+    const a = (Math.random() - 0.5) * 1.3;
+    const dist = 9 + Math.random() * 2.5;
     mesh.position.set(Math.sin(a) * dist, 0, -Math.cos(a) * dist);
     group.add(mesh);
+    const meshes = [];
+    mesh.traverse((o) => {
+      if (o.isMesh && o.castShadow) meshes.push(o);
+    });
     enemies.push({
       mesh,
+      meshes,
       kind: 'sword',
       alive: true,
       windup: 0,
       swing: Math.floor(Math.random() * 2),
       seed: Math.random() * 10,
       dying: 0,
-      speed: TUNING.meleeSpeed * (1 + Math.min(spawned - 1, 5) * 0.04),
+      speed: TUNING.meleeSpeed * (0.9 + Math.random() * 0.2),
+      // Where he waits his turn: an angle around the player and a distance.
+      slot: (spawned % 2 ? 1 : -1) * (0.15 + ((spawned - 1) >> 1) * 0.28) + (Math.random() - 0.5) * 0.1,
+      ring: 4.3 + Math.random() * 1.3,
+      vx: 0,
+      vz: 0,
+      morale: 1,
+      hesitate: 0,
+      dodgeT: 0,
+      dodgeX: 0,
+      dodgeZ: 0,
+      dodgedSwing: false,
+      engaged: false,
+      shouted: false,
     });
   }
 
@@ -419,6 +443,22 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     e.dying = 0.001;
     kills += 1;
     sparks.burst(point || e.mesh.position.clone().setY(1.2), 0xffe1b0, 10, 3.5);
+    // Fear: the men near him flinch and lose heart; some cry out.
+    let cried = false;
+    for (const o of enemies) {
+      if (!o.alive || o === e) continue;
+      const d = Math.hypot(o.mesh.position.x - e.mesh.position.x, o.mesh.position.z - e.mesh.position.z);
+      if (d > 4.5) continue;
+      const shock = (1 - d / 4.5) * (0.3 + Math.random() * 0.25);
+      o.morale = Math.max(0, (o.morale ?? 1) - shock);
+      o.hesitate = Math.max(o.hesitate || 0, 0.3 + Math.random() * 0.6);
+      if (o.kind === 'archer') o.cooldown += 0.5 + Math.random() * 0.5;
+      if (o.morale < 0.35) o.engaged = false;
+      if (!cried && Math.random() < 0.5) {
+        cried = true;
+        setTimeout(() => active && playShout('fear'), 150 + Math.random() * 200);
+      }
+    }
     // Cutting down a swordsman means beating his blade: steel rings on steel.
     if (usesSword() && e.kind === 'sword') playClang();
     playHit();
@@ -496,6 +536,43 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       e.windup = -0.28;
     }
     e.swing += 1;
+    // Strike and give ground: he may fall back to the ring and let another
+    // man take his turn.
+    if (Math.random() < 0.45 && !desperate()) e.engaged = false;
+  }
+
+  // Few left alive: the survivors fight for their lives. No more holding
+  // back or wavering, faster, and quicker to dodge.
+  function swordsLeft() {
+    let n = 0;
+    for (const e of enemies) if (e.alive && e.kind === 'sword') n += 1;
+    return n + Math.max(0, quota - spawned);
+  }
+  function desperate() {
+    return (mode === 'sword-melee' || mode === 'bow-melee') && spawned >= quota && swordsLeft() <= 3;
+  }
+
+  // Ten men casting shadows is too much for a headset: only the nearest
+  // four do, refreshed twice a second.
+  function updateShadows(dt) {
+    shadowT -= dt;
+    if (shadowT > 0) return;
+    shadowT = 0.5;
+    const live = enemies.filter((e) => e.alive && e.meshes);
+    live.sort((a, b) => a.mesh.position.distanceToSquared(_player) - b.mesh.position.distanceToSquared(_player));
+    live.forEach((e, i) => {
+      const cast = i < 4;
+      if (e.castsShadow === cast) return;
+      e.castsShadow = cast;
+      for (const m of e.meshes) m.castShadow = cast;
+    });
+  }
+
+  // Get out of the way: a quick sidestep (and a little back) for `t` s.
+  function dodge(e, sideX, sideZ, t, speed) {
+    e.dodgeT = t;
+    e.dodgeX = sideX * speed;
+    e.dodgeZ = sideZ * speed;
   }
 
   // The swish of a swordsman's blade as it comes down, if he is near enough
@@ -582,6 +659,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     quota = TUNING.meleeQuota;
     vulnerable = false;
     spawnT = 0;
+    nextGap = 0;
     spawned = 0;
     blocks = 0;
     shieldUp = 0;
@@ -937,7 +1015,11 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (!ready(right) && !ready(left)) return;
 
     if (!stringHeld) {
-      if (right.pull && !left.pull && ready(right)) bowSide = 'right';
+      const drawHand = hooks.clickHand?.();
+      if (drawHand === 'left' || drawHand === 'right') {
+        // The hand they click with draws the string. The other holds the bow.
+        bowSide = drawHand === 'left' ? 'right' : 'left';
+      } else if (right.pull && !left.pull && ready(right)) bowSide = 'right';
       else if (left.pull && !right.pull && ready(left)) bowSide = 'left';
       else if (right.pull && left.pull && ready(right) && ready(left)) {
         const held = bowSide === 'left' ? left : right;
@@ -1227,17 +1309,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
     const melee = mode === 'sword-melee' || mode === 'bow-melee';
     if (melee) {
-      // The first swordsman charges; the second appears right behind him so
-      // they come at the player together, and the rest keep coming
-      // (1.8 s shrinking to 1.2 s), at most three on the field, and straight
-      // away whenever the field is empty.
+      // The whole wave comes on together, each man a beat behind the last.
       spawnT += dt;
-      const alive = enemies.filter((e) => e.alive && e.kind === 'sword').length;
-      const gap = spawned <= 1 ? 0 : Math.max(1.2, 1.8 - (spawned - 2) * 0.15);
-      if (spawned < quota && alive < 3 && (spawnT > gap || (alive === 0 && spawnT > 0.5))) {
+      if (spawned < quota && spawnT > nextGap) {
         spawnSwordsman();
         spawnT = 0;
+        nextGap = TUNING.waveStagger[0] + Math.random() * (TUNING.waveStagger[1] - TUNING.waveStagger[0]);
+        if (spawned === 1 || spawned === 4 || spawned === 8) setTimeout(() => active && playShout('cry'), 120);
       }
+      updateShadows(dt);
     }
 
     for (const e of enemies) {
@@ -1262,34 +1342,118 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       e.mesh.rotation.y += turn * (1 - Math.exp(-10 * dt));
 
       if (e.kind === 'sword') {
-        const speed = e.speed || TUNING.meleeSpeed;
-        if (dist > 1.2) {
-          const step = speed * dt;
-          e.mesh.position.x += (_dir.x / dist) * step;
-          e.mesh.position.z += (_dir.z / dist) * step;
-          if (dist < SWING_FROM) {
-            // Charging in already swinging: cuts start well before he
-            // reaches the player, and land only once he is within reach.
-            e.windup += dt;
-            rig?.drive(dt, { action: 'charge', t: e.windup, variant: e.swing, speed, look: _camPos });
-            swingWhoosh(e, dist);
-            if (e.windup > 0.62) {
-              if (dist <= SWORD_REACH) landBlow(e, dist);
-              else {
-                e.windup = -0.2;
-                e.swing += 1;
-              }
-            }
-          } else {
-            rig?.drive(dt, { action: 'run', speed, look: _camPos });
-            e.windup = 0;
+        const wild = desperate();
+        const speed = (e.speed || TUNING.meleeSpeed) * (wild ? 1.15 : 1);
+        e.hesitate = Math.max(0, e.hesitate - dt);
+        e.dodgeT = Math.max(0, e.dodgeT - dt);
+        e.morale = Math.min(1, e.morale + dt * 0.07);
+        if (wild) e.morale = Math.max(e.morale, 0.6);
+        const ux = _dir.x / dist;
+        const uz = _dir.z / dist;
+        // Take a turn at the player when one is free, the closer men first.
+        if (!e.engaged && e.hesitate <= 0 && e.morale > 0.45 && dist < 7.5) {
+          let engaged = 0;
+          for (const o of enemies) if (o.alive && o.kind === 'sword' && o.engaged) engaged += 1;
+          if (engaged < (wild ? 3 : TUNING.maxEngaged)) e.engaged = true;
+        }
+        let wantX = 0;
+        let wantZ = 0;
+        let action = 'run';
+        if (e.dodgeT > 0) {
+          // Mid-dodge: a fast sidestep, no steering.
+          wantX = e.dodgeX;
+          wantZ = e.dodgeZ;
+        } else if (e.hesitate > 0) {
+          // Flinching: a step or two back, eyes on the player.
+          wantX = -ux * 1.1;
+          wantZ = -uz * 1.1;
+          action = 'idle';
+        } else if (e.morale < 0.35) {
+          // Wavering: back off out of reach until his nerve returns.
+          const back = dist < 6 ? 2.6 : 0;
+          wantX = -ux * back;
+          wantZ = -uz * back;
+          action = back ? 'run' : 'idle';
+        } else if (e.engaged) {
+          if (dist > 1.25) {
+            wantX = ux * speed;
+            wantZ = uz * speed;
           }
         } else {
-          e.windup += dt;
-          rig?.drive(dt, { action: 'strike', t: e.windup, variant: e.swing, look: _camPos });
-          swingWhoosh(e, dist);
-          if (e.windup > 0.62) landBlow(e, dist);
+          // Hold his place in the ring around the player, pacing a little
+          // from side to side while he waits for an opening.
+          const pace = Math.sin(phaseT * 0.9 + e.seed) * 0.35;
+          const ang = e.slot + pace * 0.25;
+          const tx = _player.x + Math.sin(ang) * e.ring;
+          const tz = _player.z - Math.cos(ang) * e.ring;
+          const ddx = tx - e.mesh.position.x;
+          const ddz = tz - e.mesh.position.z;
+          const dd = Math.hypot(ddx, ddz);
+          const v = Math.min(speed, dd * 2.2);
+          if (dd > 0.05) {
+            wantX = (ddx / dd) * v;
+            wantZ = (ddz / dd) * v;
+          }
+          action = v > 0.6 ? 'run' : 'idle';
         }
+        // Keep a shoulder's width from the next man.
+        for (const o of enemies) {
+          if (o === e || !o.alive || o.kind !== 'sword') continue;
+          const sx = e.mesh.position.x - o.mesh.position.x;
+          const sz = e.mesh.position.z - o.mesh.position.z;
+          const sd = Math.hypot(sx, sz);
+          if (sd > 0.001 && sd < 1.1) {
+            const push = (1.1 - sd) * 4;
+            wantX += (sx / sd) * push;
+            wantZ += (sz / sd) * push;
+          }
+        }
+        const k = e.dodgeT > 0 ? 1 : 1 - Math.exp(-8 * dt);
+        e.vx += (wantX - e.vx) * k;
+        e.vz += (wantZ - e.vz) * k;
+        e.mesh.position.x += e.vx * dt;
+        e.mesh.position.z += e.vz * dt;
+        // Never closer than arm's length.
+        const nx = e.mesh.position.x - _player.x;
+        const nz = e.mesh.position.z - _player.z;
+        const nd = Math.hypot(nx, nz);
+        if (nd < 1.0 && nd > 0.001) {
+          e.mesh.position.x = _player.x + (nx / nd) * 1.0;
+          e.mesh.position.z = _player.z + (nz / nd) * 1.0;
+        }
+        const moving = Math.hypot(e.vx, e.vz);
+        if (e.engaged && e.dodgeT <= 0 && e.hesitate <= 0 && dist < SWING_FROM) {
+          // Charging in already swinging: cuts start well before he reaches
+          // the player, and land only once he is within reach.
+          e.windup += dt * (wild ? 1.2 : 1);
+          if (dist > 1.3) rig?.drive(dt, { action: 'charge', t: e.windup, variant: e.swing, speed: Math.max(1, moving), look: _camPos });
+          else rig?.drive(dt, { action: 'strike', t: e.windup, variant: e.swing, look: _camPos });
+          swingWhoosh(e, dist);
+          if (e.windup > 0.62) {
+            if (dist <= SWORD_REACH) landBlow(e, dist);
+            else {
+              e.windup = -0.2;
+              e.swing += 1;
+            }
+          }
+        } else {
+          e.windup = Math.min(e.windup, 0);
+          e.windup += dt;
+          if (action === 'idle' || moving < 0.5) rig?.drive(dt, { action: 'idle', look: _camPos });
+          else rig?.drive(dt, { action: 'run', speed: Math.max(1, moving), look: _camPos });
+        }
+        // Dodge the player's cut: a man who sees the blade coming (and isn't
+        // committed to his own swing) may jump out of the way.
+        if (hot > 0 && usesSword()) {
+          if (!e.dodgedSwing && e.dodgeT <= 0 && dist < 2.6 && e.windup < 0.25) {
+            e.dodgedSwing = true;
+            if (Math.random() < (wild ? 0.4 : 0.25)) {
+              const side = Math.random() < 0.5 ? 1 : -1;
+              dodge(e, -uz * side - ux * 0.6, ux * side - uz * 0.6, 0.32, 5);
+            }
+          }
+        } else e.dodgedSwing = false;
+        if (e.dodgeT > 0) continue;
         if (hot > 0 && usesSword()) {
           const chest = _local.set(e.mesh.position.x, 1.25, e.mesh.position.z);
           if (scripted) {
@@ -1313,6 +1477,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         }
       } else {
         group.localToWorld(_aimWorld.copy(_chest));
+        e.dodgeT = Math.max(0, (e.dodgeT || 0) - dt);
+        if (e.dodgeT > 0) {
+          // Diving out of an arrow's path: no shooting until he's set again.
+          e.mesh.position.x += e.dodgeX * dt;
+          e.mesh.position.z += e.dodgeZ * dt;
+          e.cooldown = Math.max(e.cooldown, 0.5);
+          rig?.drive(dt, { action: 'run', speed: 4, look: _camPos });
+          continue;
+        }
         const draw = e.cooldown < 0.7 ? 1 - Math.max(0, e.cooldown) / 0.7 : 0;
         e.sinceShot += dt;
         rig?.drive(dt, { action: 'archer', draw, sinceShot: e.sinceShot, aim: _aimWorld });
@@ -1354,8 +1527,30 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       arrow.mesh.quaternion.setFromUnitVectors(_forward, _dir);
 
       if (arrow.fromPlayer) {
+        // Anyone the shot is about to reach may see it and dive aside. A
+        // homing arrow loses the man who dodges it.
+        arrow.tried ||= new Set();
+        const spd = arrow.vel.length() || 1;
         for (const e of enemies) {
-          if (!e.alive) continue;
+          if (!e.alive || arrow.tried.has(e) || e.dodgeT > 0) continue;
+          const rx = e.mesh.position.x - arrow.mesh.position.x;
+          const rz = e.mesh.position.z - arrow.mesh.position.z;
+          const vx = arrow.vel.x / spd;
+          const vz = arrow.vel.z / spd;
+          const along = rx * vx + rz * vz;
+          if (along <= 0 || along / spd > 0.45) continue;
+          const across = rx * vz - rz * vx;
+          if (Math.abs(across) > 1.4) continue;
+          arrow.tried.add(e);
+          const chance = (e.kind === 'archer' ? 0.45 : 0.3) + (desperate() ? 0.15 : 0);
+          if (Math.random() < chance) {
+            const side = across >= 0 ? 1 : -1;
+            dodge(e, vz * side, -vx * side, 0.36, 5.4);
+            if (arrow.target === e) arrow.target = null;
+          }
+        }
+        for (const e of enemies) {
+          if (!e.alive || e.dodgeT > 0.12) continue;
           const hitR = e.kind === 'archer' ? 1.05 : 1.2;
           _local.set(e.mesh.position.x, 1.15, e.mesh.position.z);
           const d = distPointSeg(_local, arrow.prev, arrow.mesh.position);

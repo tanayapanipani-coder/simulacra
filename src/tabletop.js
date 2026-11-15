@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=1eff359';
-import { createMiniature, metal, standard } from './pieces.js?v=1eff359';
-import { steelTex, woodTex } from './textures.js?v=1eff359';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=1eff359';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=87779e0';
+import { createMiniature, metal, standard } from './pieces.js?v=87779e0';
+import { steelTex, woodTex } from './textures.js?v=87779e0';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=87779e0';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -553,6 +553,7 @@ export function createTabletop(scene, sfx = {}) {
     room,
     pickables,
     figures,
+    boardTop: top,
     refresh,
     update,
     again,

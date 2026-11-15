@@ -12,13 +12,13 @@
 // Without a key she still stands there, plays and coaches, but in text (toasts) instead of speech.
 
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=1eff359';
-import { createAvatar } from '../webxr/avatar.js?v=1eff359';
-import { rtcConnector } from '../webxr/realtime-rtc.js?v=1eff359';
-import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=1eff359';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js?v=87779e0';
+import { createAvatar } from '../webxr/avatar.js?v=87779e0';
+import { rtcConnector } from '../webxr/realtime-rtc.js?v=87779e0';
+import { agentId, relayUrl, voicePass } from '../webxr/voice-pass.js?v=87779e0';
 import { Conversation } from '@elevenlabs/client';
-import { TOP, squareLocal } from './tabletop.js?v=1eff359';
-import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=1eff359';
+import { TOP, squareLocal } from './tabletop.js?v=87779e0';
+import { assess, bestMove, boardText, clashRecord, describeAction } from './search.js?v=87779e0';
 
 const KEY_NAME = 'simulacra.openaiKey'; // shared with the Simulacra page on the same site
 const MODEL = 'gpt-realtime';
@@ -27,6 +27,9 @@ const RULES = `Crownfall rules: a five-by-five board. Each side has, left to rig
 Squares are named like chess: files a to e from the user's left, ranks 1 to 5 from the user's side. The user plays Gold (starts on rank 1) and moves first. You play Violet (rank 5).`;
 
 export const INSTRUCTIONS = `You are Sim. You are standing across a small table from the user, playing the board game Crownfall against them and helping them get good at it. You have a body: they can see you.
+
+# Your attitude
+You play to win and you love a bit of trash talk. Cocky, quick, funny, never mean: think a friend who is very sure they will beat you. "You're going down." "Bold. Wrong, but bold." "Is that the plan? Cute." "My swordsmen send their regards." When you are losing, you get dramatic about it ("No! My beautiful archer!") instead of sulking, and you give real credit when they play well, grudgingly.
 
 # How you talk
 Like a friend across the table, not a commentator or a teacher. This matters more than anything else here:
@@ -44,7 +47,7 @@ ${RULES}
 # What the game tells you
 Messages starting with [game] come from the game, not from the user. They show what just happened and the board (G = Gold, the user; V = Violet, you; A archer, S swordsman, X monarch).
 - Most [game] messages need no words. If one does not clearly call for a remark, stay silent (call skip_turn).
-- Your own moves are made for you and reported with their reason. Do not announce them. Speak only if it threatens their monarch ("watch your monarch") or it is a good moment for a two-word taunt.
+- Your own moves are made for you and reported with their reason. Do not announce them. When it threatens their monarch, gloat about it ("Your monarch looks nervous."); otherwise a short taunt now and then is welcome.
 - A coaching note about the user's move: if it is a blunder or a missed win, tell them in one sentence what to look for. Otherwise say nothing, or at most "nice" now and then.
 - You cannot see the duels. You are told who won: react in a few words.
 - If they ask what to do or for a hint, call suggest_move and give the move and the reason in one sentence. If they ask about the position, call get_board first.`;
@@ -594,6 +597,19 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
   }
   const boardNow = () => `\nBoard now:\n${boardText(getGame().board)}`;
 
+  // Short lines for when there is no live voice: cocky and playful.
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  const TAUNTS = {
+    move: ["Sim: You're going down.", 'Sim: Your move. Choose wisely. Or don\'t.', 'Sim: I can see your whole plan. Adorable.', "Sim: Tick tock.", "Sim: Bold. Wrong, but bold."],
+    threat: ['Sim: Your monarch looks nervous.', "Sim: Watch your monarch. Or don't, that works for me.", 'Sim: Knock knock. Who\'s there? My army.'],
+    attack: ["Sim: I'm coming for your {piece}. Defend it, if you can!", 'Sim: Ten of my best. Good luck with that.', "Sim: My {piece}-hunters are hungry. You're going down!"],
+    defend: ["Sim: Attacking me? Brave. You're going down.", 'Sim: Ten of my best are waiting for you.', 'Sim: Oh, you want a fight? Okay.'],
+    wonDuel: ['Sim: That one is mine. Obviously.', 'Sim: Ouch. For you.', 'Sim: Was that your best swing? Be honest.'],
+    lostDuel: ['Sim: No! My beautiful soldiers!', 'Sim: Fine. Lucky swing.', "Sim: Okay, that was actually good. Don't let it go to your head."],
+    youWin: ['Sim: Ugh. Well played. Rematch, right now.', "Sim: You got me. I demand a rematch."],
+    iWin: ["Sim: Checkmate-ish. Told you you're going down. Again?", 'Sim: Your monarch is on the floor. Again?'],
+  };
+
   let retries = 0;
   return {
     update,
@@ -645,7 +661,8 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
 
     /** Her move, or null if she has none. */
     chooseMove(game) {
-      const m = bestMove(game.board, her, record);
+      // She plays to win: barely any randomness in her choice.
+      const m = bestMove(game.board, her, record, () => Math.random() * 0.2);
       if (m) reachFor(m.to.r, m.to.c);
       return m;
     },
@@ -681,20 +698,22 @@ export function createSim({ scene, board, getCamera, getGame, human, say }) {
 
     sheMoved(boardBefore, action) {
       const threat = /threatens/.test(action.reason);
-      report(`You played: ${describeAction(boardBefore, action)}. Your reason: ${action.reason}.${boardNow()}`, threat, threat ? 'Sim: Watch your monarch.' : '');
+      // Gloat when the monarch is in danger; otherwise trash-talk now and then.
+      const taunt = threat || Math.random() < 0.3;
+      report(`You played: ${describeAction(boardBefore, action)}. Your reason: ${action.reason}.${taunt && !threat ? ' Throw in a short taunt.' : ''}${boardNow()}`, taunt, taunt ? pick(threat ? TAUNTS.threat : TAUNTS.move) : '');
     },
 
     duelStarting(humanType, foeType, sheAttacks) {
-      report(sheAttacks ? `You attacked the user's ${humanType === 'A' ? 'archer' : 'swordsman'} with your ${foeType === 'A' ? 'archer' : 'swordsman'}. They are now fighting the duel to defend it.` : `The user attacked your ${foeType === 'A' ? 'archer' : 'swordsman'} with their ${humanType === 'A' ? 'archer' : 'swordsman'} and is now fighting the duel.`, false, sheAttacks ? `Sim: I'm attacking your ${humanType === 'A' ? 'archer' : 'swordsman'}. Defend it!` : '');
+      report(sheAttacks ? `You attacked the user's ${humanType === 'A' ? 'archer' : 'swordsman'} with your ${foeType === 'A' ? 'archer' : 'swordsman'}. They are now fighting the duel to defend it. Taunt them in a few words.` : `The user attacked your ${foeType === 'A' ? 'archer' : 'swordsman'} with their ${humanType === 'A' ? 'archer' : 'swordsman'} and is now fighting the duel. Taunt them in a few words.`, true, pick(sheAttacks ? TAUNTS.attack : TAUNTS.defend).replace('{piece}', humanType === 'A' ? 'archer' : 'swordsman'));
     },
 
     duelEnded(humanType, foeType, humanWon) {
       record.record(humanType, foeType, humanWon);
-      report(`The duel is over: the user ${humanWon ? 'won' : 'lost'} it. Their record: ${record.summary()}. React in a few words${humanWon ? '' : '; if they have lost this kind of duel more than once, add one short practical tip'}.${boardNow()}`, true, humanWon ? 'Sim: Nicely fought.' : 'Sim: That one is mine.');
+      report(`The duel is over: the user ${humanWon ? 'won' : 'lost'} it. Their record: ${record.summary()}. React in a few words, in character${humanWon ? ' (dramatic about losing your men, grudging credit)' : ' (gloat a little; if they have lost this kind of duel more than once, add one short practical tip)'}.${boardNow()}`, true, pick(humanWon ? TAUNTS.lostDuel : TAUNTS.wonDuel));
     },
 
     gameOver(winner) {
-      report(winner == null ? 'The game ended in a draw: nobody can move.' : winner === human ? 'The user struck your monarch and won the game. Congratulate them in one sentence and offer another game.' : 'You struck the user\'s monarch and won the game. Be gracious in one sentence and offer another game.', true, winner === human ? 'Sim: Well played. Again?' : winner == null ? '' : 'Sim: Got your monarch. Watch which squares my pieces can reach. Again?');
+      report(winner == null ? 'The game ended in a draw: nobody can move.' : winner === human ? 'The user struck your monarch and won the game. Be a dramatic but good sport about it in one sentence and demand a rematch.' : 'You struck the user\'s monarch and won the game. Gloat playfully in one sentence and offer another game.', true, winner == null ? '' : pick(winner === human ? TAUNTS.youWin : TAUNTS.iWin));
     },
   };
 }
