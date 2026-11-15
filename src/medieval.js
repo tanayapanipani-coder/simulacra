@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=1295735';
+import { clothTex, steelTex } from './textures.js?v=b6172d3';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -7,7 +7,7 @@ import { clothTex, steelTex } from './textures.js?v=1295735';
 //     embroidered V-neck, long sleeves with embroidered bands and a full
 //     skirt, painted on her own surface in the shader so it fits and moves
 //     exactly (skin of the face, neck and hands, and hair untouched);
-//   - puffed sleeve-heads, peplum tabs and the skirt's fall as meshes on
+//   - puffed sleeve-heads and the skirt's fall as meshes on
 //     her bones;
 //   - a thin gold circlet with a jewel on her brow.
 
@@ -59,7 +59,7 @@ bool painted = true;
     diffuseColor.rgb = band ? embroidery(vec2(along * armLen, atan(bp.z, bp.y) * 6.0)) * shade : WINE * shade;
   } else if (bp.y < uWaist && bp.x < 24.0) {
     // Below the waist: the skirt's wine cloth (the skirt mesh is the same).
-    diffuseColor.rgb = WINE * clamp(lum0 * 1.6, 0.7, 1.05);
+    diffuseColor.rgb = WINE * clamp(lum0 * 2.4, 1.0, 1.3);
   } else if (bp.y < uBust + 9.0 && bp.x < 24.0) {
     float vTop = uBust - 10.0;
     float vHalf = (bp.y - vTop) * 0.4;
@@ -145,9 +145,9 @@ function skirt(top, bottom) {
   // read as one cloth.
   const velvet = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
   velvet.color.setRGB(...WINE);
-  // Hugging the waist at the top (her hips below are painted the same
-  // cloth, so the skirt and body read as one), flaring to the hem.
-  const geo = new THREE.CylinderGeometry(0.155, 0.38, len, 40, 8, true);
+  // The skirt mesh starts at the hips and flares to the hem; above it her
+  // own body is painted the same cloth, so the waist is exactly her waist.
+  const geo = new THREE.CylinderGeometry(0.165, 0.38, len, 40, 8, true);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const k = (len / 2 - pos.getY(i)) / len;
@@ -160,16 +160,6 @@ function skirt(top, bottom) {
   const body = new THREE.Mesh(geo, velvet);
   body.position.y = -len / 2;
   g.add(body);
-  // The bodice's peplum: green velvet tabs flaring over the top of the skirt.
-  const green = new THREE.MeshStandardMaterial({ roughness: 0.75, side: THREE.DoubleSide });
-  green.color.setRGB(...GREEN);
-  const tabs = 9;
-  for (let i = 0; i < tabs; i++) {
-    const t0 = (i / tabs) * Math.PI * 2 + 0.03;
-    const tab = new THREE.Mesh(new THREE.CylinderGeometry(0.162, 0.205, 0.1, 6, 1, true, t0, (Math.PI * 2) / tabs - 0.06), green);
-    tab.position.y = -0.045;
-    g.add(tab);
-  }
   // A waist is wider than it is deep.
   g.scale.set(1, 1, 0.8);
   return g;
@@ -260,7 +250,8 @@ export function dressMedieval(avatar) {
   if (b.hips && b.lFoot) {
     const hipsP = local(b.hips);
     const ankle = Math.min(local(b.lFoot).y, b.rFoot ? local(b.rFoot).y : 9);
-    const top = hipsP.y + 0.1;
+    // From the widest part of the hips, so it adds nothing at the waist.
+    const top = hipsP.y - 0.03;
     place(skirt(top, ankle + 0.05), new THREE.Vector3(hipsP.x, top, hipsP.z), b.hips);
   }
   // Puffed wine sleeve-heads at the shoulders, as in a court gown; the rest
