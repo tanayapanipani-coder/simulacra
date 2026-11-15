@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=69eb987';
+import { clothTex, steelTex } from './textures.js?v=76b5cfd';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -13,6 +13,25 @@ import { clothTex, steelTex } from './textures.js?v=69eb987';
 const RECOLOR = /* glsl */ `
 #include <map_fragment>
 {
+  // Long sleeves, painted on the arm itself so they fit and move exactly:
+  // anything along the line from shoulder to wrist (in the bind pose, in
+  // the model's centimetres) is sleeve; the hands stay bare.
+  vec3 bp = vBindPos;
+  bp.x = abs(bp.x);
+  vec3 armDir = uWrist - uShoulder;
+  float armLen = length(armDir);
+  float along = dot(bp - uShoulder, armDir) / (armLen * armLen);
+  float across = length(bp - uShoulder - armDir * along);
+  bool onArm = along > 0.04 && along < 0.975 && across < 10.0;
+  vec3 c0 = diffuseColor.rgb;
+  float lum0 = dot(c0, vec3(0.2126, 0.7152, 0.0722));
+  if (onArm) {
+    // Velvet with the arm's own light and shade; a gold cuff at the wrist.
+    float shade = clamp(lum0 * 1.4, 0.35, 1.1);
+    diffuseColor.rgb = along > 0.93 ? vec3(0.55, 0.36, 0.09) * shade : vec3(0.3, 0.025, 0.045) * shade;
+  }
+}
+{
   vec3 c = diffuseColor.rgb;
   float mx = max(c.r, max(c.g, c.b));
   float mn = min(c.r, min(c.g, c.b));
@@ -24,6 +43,9 @@ const RECOLOR = /* glsl */ `
   } else if (sat > 0.1 && c.b > c.r * 1.08 && c.b >= c.g * 0.95) {
     // The jeans: dark brown riding leather.
     diffuseColor.rgb = vec3(0.13, 0.075, 0.04) * clamp(lum * 2.2, 0.3, 1.5);
+  } else if (sat < 0.14 && lum > 0.35 && vBindPos.y > 95.0 && vBindPos.y < 147.0 && abs(vBindPos.x) < 22.0) {
+    // The top's white trims (neckline and hems) become gold braid.
+    diffuseColor.rgb = vec3(0.55, 0.36, 0.09) * clamp(lum * 1.2, 0.4, 1.1);
   }
 }
 `;
@@ -161,6 +183,21 @@ export function dressMedieval(avatar) {
   if (!model || model.userData.medieval) return;
   model.userData.medieval = true;
 
+  // Where the left arm runs in the bind pose (the right mirrors it), from
+  // the skeleton's own bind matrices.
+  const arm = { shoulder: new THREE.Vector3(17.2, 138, -6.1), wrist: new THREE.Vector3(52.4, 106.3, 3.1) };
+  model.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    o.skeleton.bones.forEach((bone, i) => {
+      const n = bone.name.toLowerCase().replace(/_/g, ' ');
+      const at = () => new THREE.Vector3().setFromMatrixPosition(o.skeleton.boneInverses[i].clone().invert());
+      if (n.endsWith('l upperarm')) arm.shoulder.copy(at());
+      if (n.endsWith('l hand')) arm.wrist.copy(at());
+    });
+  });
+  arm.shoulder.x = Math.abs(arm.shoulder.x);
+  arm.wrist.x = Math.abs(arm.wrist.x);
+
   // Dye the body's clothes (not the head or hair).
   model.traverse((o) => {
     if (!o.isMesh) return;
@@ -169,9 +206,16 @@ export function dressMedieval(avatar) {
       if (!m || name.includes('head') || name.includes('opacity') || m.userData.medieval) continue;
       m.userData.medieval = true;
       m.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', RECOLOR);
+        shader.uniforms.uShoulder = { value: arm.shoulder };
+        shader.uniforms.uWrist = { value: arm.wrist };
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying vec3 vBindPos;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindPos = (bindMatrix * vec4(position, 1.0)).xyz;');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying vec3 vBindPos;\nuniform vec3 uShoulder;\nuniform vec3 uWrist;')
+          .replace('#include <map_fragment>', RECOLOR);
       };
-      m.customProgramCacheKey = () => 'medieval-dye';
+      m.customProgramCacheKey = () => 'medieval-dye-2';
       m.needsUpdate = true;
     }
   });
@@ -232,31 +276,5 @@ export function dressMedieval(avatar) {
     boot.add(sole, upper, cap);
     place(boot, f, foot);
   }
-  // Long sleeves: the top's own short sleeves carry on down to the wrist.
-  // Each sleeve starts just inside the end of the short sleeve, a touch
-  // narrower, in the same colour the top is dyed, so it reads as one
-  // garment; it ends in a narrow gold band at the wrist. Each piece rides
-  // on its arm bone.
-  const sleeve = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
-  sleeve.color.setRGB(0.2, 0.018, 0.03); // linear, as the dye renders the top
-  const goldTrim = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.35 });
-  for (const s of ['l', 'r']) {
-    const upper = b[s + 'UpperArm'];
-    const fore = b[s + 'Forearm'];
-    const hand = findBone(model, (n) => n.endsWith(`${s} hand`) || n.endsWith(s === 'l' ? 'lefthand' : 'righthand'));
-    if (!upper || !fore) continue;
-    const sh = local(upper);
-    const el = local(fore);
-    const wr = hand ? local(hand) : el.clone().add(el.clone().sub(sh).multiplyScalar(0.9));
-    const attachTo = (bone, mesh) => {
-      root.add(mesh);
-      mesh.updateMatrixWorld(true);
-      bone.attach(mesh);
-    };
-    // Upper arm: from under the short sleeve's hem to just past the elbow.
-    attachTo(upper, along((h) => new THREE.CylinderGeometry(0.047, 0.043, h, 18, 1, true), sleeve, sh, el, 0.72, 0.3));
-    // Forearm: a slightly loose sleeve to the wrist.
-    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.043, 0.047, h, 18, 1, true), sleeve, el, wr, 0.97, -0.03));
-    attachTo(fore, along((h) => new THREE.CylinderGeometry(0.049, 0.049, h, 18, 1, true), goldTrim, el, wr, 0.035, 0.93));
-  }
+
 }
