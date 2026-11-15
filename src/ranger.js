@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=1de04b4';
-import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=1de04b4';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js?v=97c404a';
+import { asBump, clothTex, leatherTex, mailTex, steelRough, steelTex, stoneTex, woodTex } from './textures.js?v=97c404a';
 
 // Battle-worn medieval soldiers, shared by the board miniatures and the
 // duel enemies. Realistic proportions and materials: smooth-shaded plate over

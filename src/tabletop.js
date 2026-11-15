@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=1de04b4';
-import { createMiniature, metal, standard } from './pieces.js?v=1de04b4';
-import { steelTex, woodTex } from './textures.js?v=1de04b4';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=1de04b4';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=97c404a';
+import { createMiniature, metal, standard } from './pieces.js?v=97c404a';
+import { steelTex, woodTex } from './textures.js?v=97c404a';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=97c404a';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -255,10 +255,10 @@ export function createTabletop(scene, sfx = {}) {
           blob.position.y = 0.001;
           mesh.add(blob);
           const pick = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.032, 0.032, 0.09, 8),
+            new THREE.CylinderGeometry(0.034, 0.034, 0.12, 8),
             new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
           );
-          pick.position.y = 0.045;
+          pick.position.y = 0.06;
           mesh.add(pick);
           mesh.userData = {
             id: piece.id,
@@ -289,7 +289,8 @@ export function createTabletop(scene, sfx = {}) {
             sfx.onSlide?.(piece);
             const dx = dest.x - mesh.position.x;
             const dz = dest.z - mesh.position.z;
-            if (dx * dx + dz * dz > 0.0001) mesh.rotation.y = Math.atan2(dx, dz);
+            // Turn smoothly toward the destination rather than snapping.
+            if (dx * dx + dz * dz > 0.0001) mesh.userData.face = Math.atan2(dx, dz);
           }
           // On a new game every piece walks home, then turns to face the
           // other side.
@@ -478,7 +479,12 @@ export function createTabletop(scene, sfx = {}) {
         mesh.position.z = base.z;
         mesh.position.y = base.y + Math.sin(clock.t * 2.2 + data.seed) * 0.0016;
       }
-      if (data.faceHome && !data.tween && !data.fall && !data.held && !data.slay) {
+      if (data.face != null && !data.fall && !data.held && !data.slay) {
+        const delta = Math.atan2(Math.sin(data.face - mesh.rotation.y), Math.cos(data.face - mesh.rotation.y));
+        mesh.rotation.y += delta * (1 - Math.exp(-14 * dt));
+        if (!data.tween && Math.abs(delta) < 0.01) data.face = null;
+      }
+      if (data.faceHome && data.face == null && !data.tween && !data.fall && !data.held && !data.slay) {
         const home = data.side === GOLD ? Math.PI : 0;
         const delta = Math.atan2(Math.sin(home - mesh.rotation.y), Math.cos(home - mesh.rotation.y));
         if (Math.abs(delta) < 0.01) {
@@ -548,6 +554,10 @@ export function createTabletop(scene, sfx = {}) {
     again,
     turnSprite,
     TOP,
+    // Keep the floating turn sign beyond the far edge from the viewer.
+    setViewerSide(side) {
+      turnSprite.position.z = (side === 1 ? 1 : -1) * (TOP / 2 + 0.16);
+    },
   };
 }
 

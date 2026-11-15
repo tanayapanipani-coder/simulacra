@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=1de04b4';
+import { clashBlurb } from './rules.js?v=97c404a';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=1de04b4';
-import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=1de04b4';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=1de04b4';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=1de04b4';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=1de04b4';
+} from './pieces.js?v=97c404a';
+import { playArrow, playDeflect, playHit, playHurt, playWhoosh } from './audio.js?v=97c404a';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=97c404a';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=97c404a';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=97c404a';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -212,6 +212,9 @@ export function createCombat({ scene, camera, renderer, hooks }) {
   // (weapons posed from tracked hand joints every frame).
   let gripMode = 'screen';
   let stringHeld = false;
+  let drawPeak = 0;
+  let releaseWait = 0;
+  const _peakNock = new THREE.Vector3();
   let pinching = false;
   let haveTipPrev = false;
 
@@ -265,6 +268,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     weapon.scale.setScalar(1);
     gripMode = wantedGripMode();
     stringHeld = false;
+    drawPeak = 0;
     pinching = false;
     haveTipPrev = false;
     if (gripMode === 'controller2') {
@@ -293,7 +297,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         const grip = hooks.rightGrip?.() || hand;
         grip.add(weapon);
         weapon.position.set(0, 0, 0.03);
-        weapon.quaternion.setFromAxisAngle(_Z, Math.PI / 2);
+        weapon.quaternion.setFromAxisAngle(_Z, Math.PI / 2).multiply(_q1.setFromAxisAngle(_X, Math.PI / 6));
         if (left && left !== hand) {
           shield.visible = true;
           left.add(shield);
@@ -828,6 +832,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     if (locked?.alive) arrow.target = locked;
     playArrow();
     draw = 0;
+    drawPeak = 0;
     reload = 0.32;
   }
 
@@ -842,14 +847,17 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     bow.localToWorld(_gripW.copy(bow.userData.grip));
     // The hand can catch the string anywhere near it or the bow's grip, and
     // in either order: press then reach, or reach then press.
-    const near = reload <= 0 && Math.min(point.distanceTo(_nockW), point.distanceTo(_gripW) + 0.05) < radius;
+    const near = Math.min(point.distanceTo(_nockW), point.distanceTo(_gripW) + 0.05) < radius;
     if (near && !nearString && !stringHeld) hooks.haptic?.(0.12);
     nearString = near;
     if (pulling && !stringHeld && near) {
       stringHeld = true;
+      drawPeak = 0;
+      releaseWait = 0;
       hooks.haptic?.(0.35);
     }
     if (stringHeld && pulling) {
+      releaseWait = 0;
       bow.worldToLocal(_nockL.copy(point));
       // The string only travels backward; keep it near the bow's centre line.
       _nockL.x = THREE.MathUtils.clamp(_nockL.x, -0.06, 0.06);
@@ -857,11 +865,24 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       _nockL.z = Math.max(bow.userData.restZ, _nockL.z);
       const was = draw;
       draw = THREE.MathUtils.clamp((_nockL.z - bow.userData.restZ) / FULL_DRAW, 0, 1);
+      // Remember the deepest point of the pull, so a string that slips
+      // forward as the fingers open still looses at full strength.
+      if (draw >= drawPeak) {
+        drawPeak = draw;
+        _peakNock.copy(_nockL);
+      }
       if (draw >= 1 && was < 1) hooks.haptic?.(0.5);
     }
     if (stringHeld && !pulling) {
+      releaseWait += dt || 0.016;
+      if (releaseWait < 0.06) return;
+      releaseWait = 0;
       stringHeld = false;
-      if (draw > 0.15 && reload <= 0) {
+      const power = Math.max(draw, drawPeak);
+      if (drawPeak > draw) _nockL.copy(_peakNock);
+      drawPeak = 0;
+      if (power > 0.15) {
+        draw = power;
         // Fly along the drawn arrow: from the nock through the grip.
         bow.localToWorld(_nockW.copy(_nockL));
         bow.localToWorld(_gripW.copy(bow.userData.grip));
@@ -877,7 +898,10 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       draw = 0;
       _nockL.set(0, 0, bow.userData.restZ);
     }
-    if (!stringHeld) draw = Math.max(0, draw - dt * 3);
+    if (!stringHeld) {
+      draw = Math.max(0, draw - dt * 3);
+      if (draw <= 0) drawPeak = 0;
+    }
   }
 
   // The string glows gold when the drawing hand can catch it, and brighter
@@ -892,11 +916,11 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     stringMat.emissiveIntensity = stringHeld ? 1.6 : nearString ? 0.9 : 0;
   }
 
-  // Two controllers: the bow is held in the left one (limbs along its
-  // handle, facing where it points) and the right one pulls the string.
+  // Two controllers: the bow is held in the right one and the left one
+  // pulls the string. Releasing the left grip is what looses the arrow.
   function poseFromControllers(dt) {
-    const leftGrip = hooks.leftGrip?.();
-    const leftRay = hooks.leftHand?.();
+    const leftGrip = hooks.rightGrip?.();
+    const leftRay = hooks.rightHand?.();
     if (!leftGrip || !leftRay) return;
     leftGrip.getWorldPosition(_gripPos);
     // The bow faces where the left controller points and stands upright,
@@ -916,11 +940,13 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     bow.visible = true;
     bow.updateMatrixWorld(true);
 
-    const rightGrip = hooks.rightGrip?.();
-    const selecting = !!hooks.rightSelecting?.();
+    const rightGrip = hooks.leftGrip?.();
+    const selecting = !!hooks.leftSelecting?.();
     if (rightGrip) {
       rightGrip.getWorldPosition(_pullW);
       pullString(_pullW, selecting, 0.3, dt);
+    } else if (stringHeld) {
+      pullString(_pullW, false, 0.3, dt);
     }
     glowString();
   }
@@ -1076,7 +1102,15 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     }
 
     if (phase === 'result') {
-      if (phaseT > 1.05) {
+      let falling = false;
+      for (const e of enemies) {
+        if (!e.dying) continue;
+        e.dying += dt;
+        e.mesh.rotation.x = -Math.min(1.4, Math.max(0, e.dying - 0.12) * 2.6);
+        e.mesh.userData.rig?.drive(dt, { action: 'die', t: e.dying });
+        if (e.dying < 1.1) falling = true;
+      }
+      if (phaseT > 1.15 && !falling) {
         const win = resultWin;
         teardown();
         resolveFn?.(win);
@@ -1134,9 +1168,21 @@ export function createCombat({ scene, camera, renderer, hooks }) {
         }
         if (!mousePull && !autoDraw) draw = Math.max(0, draw - dt * 3);
       } else if (gripMode === 'controller') {
-        if (input.primaryDown) draw = Math.min(1, draw + dt / 0.5);
-        if (input.primaryReleased && draw > 0.32 && reload <= 0) loose();
-        else if (!input.primaryDown) draw = Math.max(0, draw - dt * 3);
+        if (input.primaryDown) {
+          draw = Math.min(1, draw + dt / 0.5);
+          drawPeak = Math.max(drawPeak, draw);
+        }
+        if (input.primaryReleased) {
+          const power = Math.max(draw, drawPeak);
+          drawPeak = 0;
+          if (power > 0.2) {
+            draw = power;
+            loose();
+          } else draw = 0;
+        } else if (!input.primaryDown) {
+          draw = Math.max(0, draw - dt * 3);
+          if (draw <= 0) drawPeak = 0;
+        }
       }
     }
     if (!usesSword()) reload = Math.max(0, reload - dt);

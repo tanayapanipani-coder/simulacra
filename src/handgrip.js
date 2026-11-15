@@ -20,6 +20,10 @@ const _x = new THREE.Vector3();
 const _y = new THREE.Vector3();
 const _z = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _pitch = new THREE.Quaternion();
+const _axisX = new THREE.Vector3(1, 0, 0);
+// Tip the blade up in the fist so a level grip does not leave it pointing down.
+const BLADE_UP = Math.PI / 6;
 
 function jointPos(hand, name, out) {
   const j = hand?.joints?.[name];
@@ -57,7 +61,7 @@ export function swordGrip(hand, outPos, outQuat) {
   _x.copy(_fingers).addScaledVector(_z, -_fingers.dot(_z)).normalize();
   _y.crossVectors(_z, _x);
   _m.makeBasis(_x, _y, _z);
-  outQuat.setFromRotationMatrix(_m);
+  outQuat.setFromRotationMatrix(_m).multiply(_pitch.setFromAxisAngle(_axisX, BLADE_UP));
   // Centre of the fist: between the knuckles and the wrist, toward the palm.
   outPos.copy(_wrist).lerp(_middle, 0.62);
   outPos.addScaledVector(_y, -0.0);
