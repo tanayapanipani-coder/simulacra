@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { buildRanger, RANGER_PALETTES } from './ranger.js?v=b6172d3';
-import { createRig } from './rig.js?v=b6172d3';
-import { leatherTex, steelRough, steelTex, woodTex } from './textures.js?v=b6172d3';
+import { buildRanger, RANGER_PALETTES } from './ranger.js?v=e1feae8';
+import { createRig } from './rig.js?v=e1feae8';
+import { leatherTex, steelRough, steelTex, woodTex } from './textures.js?v=e1feae8';
 
 const MINI_SCALE = 0.045;
 

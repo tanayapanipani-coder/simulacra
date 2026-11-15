@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GOLD, SIDE_NAME, options } from './rules.js?v=b6172d3';
-import { createMiniature, metal, standard } from './pieces.js?v=b6172d3';
-import { steelTex, woodTex } from './textures.js?v=b6172d3';
-import { makeTextSprite, paintText, setSpriteText } from './text.js?v=b6172d3';
+import { GOLD, SIDE_NAME, options } from './rules.js?v=e1feae8';
+import { createMiniature, metal, standard } from './pieces.js?v=e1feae8';
+import { steelTex, woodTex } from './textures.js?v=e1feae8';
+import { makeTextSprite, paintText, setSpriteText } from './text.js?v=e1feae8';
 
 export const TOP = 0.4;
 export const SQ = TOP / 5;
@@ -406,6 +406,7 @@ export function createTabletop(scene, sfx = {}) {
   }
 
   const _viewer = new THREE.Vector3();
+  const _boardWorld = new THREE.Vector3();
   /**
    * @param {number} dt
    * @param {THREE.Vector3} [viewerWorld] the player's head, so the game-over
@@ -423,6 +424,18 @@ export function createTabletop(scene, sfx = {}) {
       // Press feedback on the button.
       const press = again.userData.pressT ? Math.max(0, 1 - (performance.now() / 1000 - again.userData.pressT) / 0.2) : 0;
       again.position.z = 0.01 - press * 0.006;
+    }
+    // The board is seated in front of the player; the wooden table lives in
+    // the room, so pull its center onto the board every frame.
+    if (room.visible) {
+      board.getWorldPosition(_boardWorld);
+      const table = room.getObjectByName('table');
+      const rug = room.getObjectByName('rug');
+      if (table) table.position.set(_boardWorld.x, _boardWorld.y - 0.03, _boardWorld.z);
+      if (rug) {
+        rug.position.x = _boardWorld.x;
+        rug.position.z = _boardWorld.z;
+      }
     }
     clock.t += dt;
     turnPulse = Math.max(0, turnPulse - dt * 1.6);
@@ -578,12 +591,14 @@ function buildRoom() {
     standard(0x4a2030, 0.85),
   );
   rug.rotation.x = -Math.PI / 2;
+  rug.name = 'rug';
   rug.position.set(0, 0.005, -0.85);
   room.add(rug);
   const table = new THREE.Mesh(
     new THREE.CylinderGeometry(0.55, 0.58, 0.06, 28),
     standard(0x3d2a1c, 0.62),
   );
+  table.name = 'table';
   table.position.set(0, 0.63, -0.85);
   room.add(table);
   const pillarGeo = new THREE.CylinderGeometry(0.12, 0.14, 2.4, 8);

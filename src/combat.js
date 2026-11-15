@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clashBlurb } from './rules.js?v=b6172d3';
+import { clashBlurb } from './rules.js?v=e1feae8';
 import {
   createArrowMesh,
   createBattleBow,
@@ -7,11 +7,11 @@ import {
   createBattleSword,
   createSoldier,
   setBowString,
-} from './pieces.js?v=b6172d3';
-import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=b6172d3';
-import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=b6172d3';
-import { createWarZone, makeSkyEnvironment } from './war.js?v=b6172d3';
-import { startWarAmbience, stopWarAmbience } from './audio.js?v=b6172d3';
+} from './pieces.js?v=e1feae8';
+import { playArrow, playArrowIncoming, playClang, playDeflect, playHit, playHurt, playShout, playWhoosh } from './audio.js?v=e1feae8';
+import { bowGrip, fist, isTracked, pinch, swordGrip, wrist } from './handgrip.js?v=e1feae8';
+import { createWarZone, makeSkyEnvironment } from './war.js?v=e1feae8';
+import { startWarAmbience, stopWarAmbience } from './audio.js?v=e1feae8';
 
 export const INLINE_ARENA = { x: 0, y: -40, z: 0, eye: 1.62 };
 
@@ -725,17 +725,22 @@ export function createCombat({ scene, camera, renderer, hooks }) {
 
   let banner = null;
 
-  function showBanner(text) {
+  function showBanner(text, color) {
     hideBanner();
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = 'bold 168px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = text === 'You Won!' ? '#f3d27a' : '#e24b4b';
+    let size = 120;
+    ctx.font = `bold ${size}px sans-serif`;
+    while (ctx.measureText(text).width > 980 && size > 48) {
+      size -= 6;
+      ctx.font = `bold ${size}px sans-serif`;
+    }
+    ctx.fillStyle = color || '#f3d27a';
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
     const map = new THREE.CanvasTexture(canvas);
     map.colorSpace = THREE.SRGBColorSpace;
@@ -772,7 +777,7 @@ export function createCombat({ scene, camera, renderer, hooks }) {
     phase = 'result';
     phaseT = 0;
     vulnerable = false;
-    showBanner(win ? 'You Won!' : 'You Lost!');
+    showBanner(win ? 'You Won!' : 'You Lost!', win ? '#f3d27a' : '#e24b4b');
     hooks.caption?.('');
     if (win) playHit();
   }
@@ -1286,9 +1291,14 @@ export function createCombat({ scene, camera, renderer, hooks }) {
       if (phaseT < 0.28) hooks.fade?.(1, '#07060a');
       else if (phaseT < 0.7) hooks.fade?.(Math.max(0, 1 - (phaseT - 0.28) / 0.4), '#07060a');
       else hooks.fade?.(0, '#000');
-      if (phaseT > 0.85 && phaseT < 1.15) hooks.caption?.('Ready');
-      if (phaseT >= 1.15 && phaseT < 1.4) hooks.caption?.('Fight');
-      if (phaseT >= 1.4) {
+      const instruct = mode === 'sword-deflect';
+      if (instruct) {
+        if (!banner && phaseT > 0.4) showBanner('Deflect the arrows with your sword!');
+        placeBanner();
+      } else if (phaseT > 0.85 && phaseT < 1.15) hooks.caption?.('Ready');
+      else if (phaseT >= 1.15 && phaseT < 1.4) hooks.caption?.('Fight');
+      if (phaseT >= (instruct ? 3.6 : 1.4)) {
+        hideBanner();
         phase = 'fight';
         phaseT = 0;
         vulnerable = true;

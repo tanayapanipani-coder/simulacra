@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clothTex, steelTex } from './textures.js?v=b6172d3';
+import { clothTex, steelTex } from './textures.js?v=e1feae8';
 
 // Dress Sim for Crownfall: a medieval look on the shared modern avatar,
 // without changing the avatar itself (the Simulacra page uses it as is).
@@ -27,71 +27,97 @@ uniform float uBust;
 const vec3 WINE = ${glslVec(WINE)};
 const vec3 GREEN = ${glslVec(GREEN)};
 const vec3 GOLD = vec3(0.55, 0.36, 0.09);
-// Embroidered braid: gold ground with red and green diamonds.
+const vec3 LINEN = vec3(0.62, 0.57, 0.48);
+// A soft 0..1 step, a few millimetres wide, so garment edges never alias.
+float edge(float v, float at) {
+  float w = max(fwidth(v), 0.08);
+  return smoothstep(at - w, at + w, v);
+}
+// Embroidered braid: gold ground with red and green diamonds, antialiased.
 vec3 embroidery(vec2 p) {
   vec2 q = fract(p * 0.55) - 0.5;
   float d = abs(q.x) + abs(q.y);
-  return d < 0.2 ? vec3(0.38, 0.03, 0.04) : d < 0.3 ? vec3(0.02, 0.12, 0.06) : GOLD;
+  float w = max(fwidth(d), 0.02);
+  vec3 c = mix(vec3(0.38, 0.03, 0.04), vec3(0.02, 0.12, 0.06), smoothstep(0.2 - w, 0.2 + w, d));
+  return mix(c, GOLD, smoothstep(0.3 - w, 0.3 + w, d));
+}
+// Cloth: an even colour with a fine weave and a slow, faint mottling, so
+// every garment reads as one continuous fabric.
+vec3 cloth(vec3 col, vec3 p, float weaveScale) {
+  float weave = 0.5 + 0.5 * sin(p.x * weaveScale) * sin(p.y * weaveScale);
+  float mottle = 0.5 + 0.5 * sin(p.x * 0.31 + p.y * 0.17) * sin(p.y * 0.23 - p.z * 0.29);
+  return col * (0.93 + 0.07 * weave) * (0.95 + 0.1 * mottle);
 }
 `;
 
 const RECOLOR = /* glsl */ `
 #include <map_fragment>
-bool painted = true;
 {
-  // Everything is painted on her own surface, so it fits and moves with
-  // her exactly. Positions are in the bind pose, in the model's centimetres
-  // (x across, y up, z forward); the right side mirrors the left.
-  vec3 bp = vBindPos;
+  // The whole gown is painted on her own surface, so it fits and moves
+  // with her exactly. Positions are in the bind pose, in the model's
+  // centimetres (x across, y up, z forward); the right side mirrors the
+  // left. Only her face, neck, hands and hair keep their own colours.
+  vec3 p = vBindPos;
+  vec3 bp = p;
   bp.x = abs(bp.x);
   vec3 c0 = diffuseColor.rgb;
-  float lum0 = dot(c0, vec3(0.2126, 0.7152, 0.0722));
-  float shade = clamp(lum0 * 1.4, 0.4, 1.1);
+  float mx = max(c0.r, max(c0.g, c0.b));
+  float mn = min(c0.r, min(c0.g, c0.b));
+  float sat = mx > 0.0 ? (mx - mn) / mx : 0.0;
+  float lum = dot(c0, vec3(0.2126, 0.7152, 0.0722));
+  bool skin = c0.r > c0.g * 1.05 && c0.g > c0.b * 1.02 && sat > 0.12;
   vec3 armDir = uWrist - uShoulder;
   float armLen = length(armDir);
   float along = dot(bp - uShoulder, armDir) / (armLen * armLen);
   float across = length(bp - uShoulder - armDir * along);
   bool onArm = along > 0.04 && along < 0.975 && across < 10.0;
-  bool front = bp.z > -2.0;
+  bool torso = bp.x < 24.0 && !onArm;
+  float back = 1.0 - edge(bp.z, -2.0);           // 1 on her back
+  // The bodice's top edge: under the bust in front, high across the back.
+  float bodiceTop = mix(uBust + 9.0, uShoulder.y + 30.0, back);
+  vec3 col = c0;
   if (onArm) {
-    // Wine sleeves with an embroidered band on the upper arm and at the cuff.
-    bool band = (along > 0.4 && along < 0.47) || along > 0.92;
-    diffuseColor.rgb = band ? embroidery(vec2(along * armLen, atan(bp.z, bp.y) * 6.0)) * shade : WINE * shade;
-  } else if (bp.y < uWaist && bp.x < 24.0) {
-    // Below the waist: the skirt's wine cloth (the skirt mesh is the same).
-    diffuseColor.rgb = WINE * clamp(lum0 * 2.4, 1.0, 1.3);
-  } else if (bp.y < uBust + 9.0 && bp.x < 24.0) {
+    // Plum sleeve; embroidered bands on the upper arm and at the cuff,
+    // each edged with a thin gold line.
+    float l = along * armLen;
+    float b0 = edge(l, 0.4 * armLen) * (1.0 - edge(l, 0.47 * armLen));
+    float b1 = edge(l, 0.92 * armLen);
+    vec3 emb = embroidery(vec2(l, atan(bp.z, bp.y) * 6.0));
+    col = mix(cloth(WINE, p, 7.0), emb, max(b0, b1));
+  } else if (torso && bp.y < uWaist) {
+    // Below the waist: the skirt.
+    col = cloth(WINE, p, 7.0);
+    // Gold piping where the bodice meets the skirt.
+    col = mix(col, GOLD, edge(bp.y, uWaist - 0.9));
+  } else if (torso && bp.y < bodiceTop) {
     float vTop = uBust - 10.0;
     float vHalf = (bp.y - vTop) * 0.4;
-    if (front && bp.y > vTop && bp.x < vHalf) {
-      // The deep V of the bodice: a wine panel edged with embroidery.
-      diffuseColor.rgb = bp.x > vHalf - 1.8 ? embroidery(bp.xy) * shade : WINE * shade;
-    } else if (front && bp.x < 1.7) {
-      // Gold lacing criss-crossing up the front.
-      float zig = abs(fract(bp.y * 0.4) - 0.5) * 2.0;
-      diffuseColor.rgb = abs(bp.x / 1.7 - zig) < 0.28 ? GOLD * shade : GREEN * 0.4 * shade;
-    } else {
-      diffuseColor.rgb = GREEN * shade;
-    }
-  } else if (bp.y < uShoulder.y + 5.0 && bp.x > 7.5 && bp.x < 17.0 && !onArm) {
-    // The bodice's shoulder straps.
-    diffuseColor.rgb = GREEN * shade;
-  } else {
-    painted = false;
+    float inV = (1.0 - back) * edge(bp.y, vTop) * (1.0 - edge(bp.y, uBust + 9.0)) * (1.0 - edge(bp.x, vHalf));
+    float vEdge = inV * edge(bp.x, vHalf - 1.8);
+    vec3 bodice = cloth(GREEN, p, 9.0);
+    // Boning: faint vertical seams every few centimetres.
+    bodice *= 0.94 + 0.06 * smoothstep(0.0, 0.25, abs(fract(bp.x / 4.5) - 0.5));
+    // Gold lacing up the front, below the V.
+    float zig = abs(fract(bp.y * 0.4) - 0.5) * 2.0;
+    float lace = (1.0 - back) * (1.0 - edge(bp.x, 1.7)) * (1.0 - edge(bp.y, vTop + 0.5));
+    float cord = 1.0 - edge(abs(bp.x / 1.7 - zig), 0.28);
+    bodice = mix(bodice, mix(GREEN * 0.35, GOLD, cord), lace);
+    col = mix(bodice, cloth(WINE, p, 7.0), inV);
+    col = mix(col, embroidery(bp.xy), vEdge);
+    // Gold piping along the bodice's top edge.
+    col = mix(col, GOLD, (1.0 - back) * (1.0 - inV) * edge(bp.y, bodiceTop - 0.8));
+  } else if (torso && back < 0.5 && bp.x > 7.5 && bp.x < 16.5 && bp.y < uShoulder.y + 5.0 && !skin) {
+    // Shoulder straps, piped at both edges.
+    col = cloth(GREEN, p, 9.0);
+    col = mix(col, GOLD, 1.0 - edge(bp.x, 8.3) + edge(bp.x, 15.7));
+  } else if (!skin && back < 0.5 && lum > 0.3 && sat < 0.18) {
+    // The white collar becomes the chemise's linen edge.
+    col = cloth(LINEN, p, 14.0);
+  } else if (!skin) {
+    // Anything else of the old clothes: the gown's plum.
+    col = cloth(WINE, p, 7.0);
   }
-}
-if (!painted) {
-  vec3 c = diffuseColor.rgb;
-  float mx = max(c.r, max(c.g, c.b));
-  float mn = min(c.r, min(c.g, c.b));
-  float sat = mx > 0.0 ? (mx - mn) / mx : 0.0;
-  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  if (sat > 0.16 && c.g > c.r * 1.08 && c.g > c.b * 1.12) {
-    // What is left of the shirt (above the bodice): the gown's wine.
-    diffuseColor.rgb = WINE * clamp(lum * 1.15, 0.3, 1.2);
-  } else if (sat > 0.1 && c.b > c.r * 1.08 && c.b >= c.g * 0.95) {
-    diffuseColor.rgb = WINE * clamp(lum * 1.6, 0.5, 1.1);
-  }
+  diffuseColor.rgb = col;
 }
 `;
 
@@ -143,16 +169,26 @@ function skirt(top, bottom) {
   const len = top - bottom;
   // Same colour the shader gives everything below her waist, so the two
   // read as one cloth.
-  const velvet = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
+  const velvet = new THREE.MeshStandardMaterial({ roughness: 0.85, side: THREE.DoubleSide });
   velvet.color.setRGB(...WINE);
-  // The skirt mesh starts at the hips and flares to the hem; above it her
-  // own body is painted the same cloth, so the waist is exactly her waist.
-  const geo = new THREE.CylinderGeometry(0.165, 0.38, len, 40, 8, true);
+  // A bell: snug at the waist, rounding out over the hips (covering them),
+  // then falling in an even flare to the hem.
+  const prof = [];
+  const steps = 24;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps; // 0 at the waist, 1 at the hem
+    const y = -t * len;
+    const hips = Math.min(1, t / 0.16);
+    const r = 0.135 + 0.065 * Math.sin((hips * Math.PI) / 2) + 0.18 * Math.max(0, t - 0.16) / 0.84;
+    prof.push(new THREE.Vector2(r, y));
+  }
+  const geo = new THREE.LatheGeometry(prof.reverse(), 48);
+  geo.translate(0, len / 2, 0);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const k = (len / 2 - pos.getY(i)) / len;
     const a = Math.atan2(pos.getX(i), pos.getZ(i));
-    const fold = 1 + Math.sin(a * 9) * 0.04 * k;
+    const fold = 1 + Math.sin(a * 9) * 0.035 * Math.max(0, k - 0.2);
     pos.setX(i, pos.getX(i) * fold);
     pos.setZ(i, pos.getZ(i) * fold);
   }
@@ -160,8 +196,8 @@ function skirt(top, bottom) {
   const body = new THREE.Mesh(geo, velvet);
   body.position.y = -len / 2;
   g.add(body);
-  // A waist is wider than it is deep.
-  g.scale.set(1, 1, 0.8);
+  // Nearly round: deep enough behind to cover the hips.
+  g.scale.set(1, 1, 0.95);
   return g;
 }
 
@@ -219,7 +255,11 @@ export function dressMedieval(avatar) {
           .replace('#include <common>', '#include <common>\n' + RECOLOR_HEAD)
           .replace('#include <map_fragment>', RECOLOR);
       };
-      m.customProgramCacheKey = () => 'medieval-gown-2';
+      m.customProgramCacheKey = () => 'medieval-gown-6';
+      // The modern clothes' folds and seams live in the normal map; the
+      // gown is smooth cloth, so leave them out.
+      m.normalMap = null;
+      m.roughness = 0.85;
       m.needsUpdate = true;
     }
   });
@@ -250,14 +290,16 @@ export function dressMedieval(avatar) {
   if (b.hips && b.lFoot) {
     const hipsP = local(b.hips);
     const ankle = Math.min(local(b.lFoot).y, b.rFoot ? local(b.rFoot).y : 9);
-    // From the widest part of the hips, so it adds nothing at the waist.
-    const top = hipsP.y - 0.03;
+    // From the waist, starting inside her (her hips are painted the same
+    // cloth), so the skirt grows smoothly out of her hips.
+    const top = hipsP.y + 0.1;
     place(skirt(top, ankle + 0.05), new THREE.Vector3(hipsP.x, top, hipsP.z), b.hips);
   }
   // Puffed wine sleeve-heads at the shoulders, as in a court gown; the rest
   // of each sleeve is painted on the arm.
-  const puffMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
-  puffMat.color.setRGB(WINE[0] * 1.25, WINE[1] * 1.25, WINE[2] * 1.25);
+  // Exactly the sleeve's cloth, so puff and sleeve read as one.
+  const puffMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
+  puffMat.color.setRGB(...WINE);
   for (const s of ['l', 'r']) {
     const upper = b[s + 'UpperArm'];
     const fore = b[s + 'Forearm'];
