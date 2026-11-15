@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=3592930';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=3592930';
-import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=3592930';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=39b44d6';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=39b44d6';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js?v=39b44d6';
 import {
   advanceTurn,
   createGame,
@@ -9,11 +9,11 @@ import {
   options,
   SIDE_NAME,
   TYPE_NAME,
-} from './rules.js?v=3592930';
-import { createTabletop, SQ, squareLocal } from './tabletop.js?v=3592930';
-import { createCombat, INLINE_ARENA } from './combat.js?v=3592930';
-import { chooseMove } from './ai.js?v=3592930';
-import { cleanCode, makeCode, openRoom } from './net.js?v=3592930';
+} from './rules.js?v=39b44d6';
+import { createTabletop, SQ, squareLocal } from './tabletop.js?v=39b44d6';
+import { createCombat, INLINE_ARENA } from './combat.js?v=39b44d6';
+import { chooseMove } from './ai.js?v=39b44d6';
+import { cleanCode, makeCode, openRoom } from './net.js?v=39b44d6';
 import {
   isMuted,
   playDefeat,
@@ -23,7 +23,7 @@ import {
   setMusicTension,
   startMusic,
   toggleMute,
-} from './audio.js?v=3592930';
+} from './audio.js?v=39b44d6';
 
 const $ = (id) => document.getElementById(id);
 const titleEl = $('title');
@@ -550,7 +550,8 @@ function onCombatView(enter) {
     savedFov = camera.fov;
     controls.enabled = false;
     // Night fog belongs to the virtual arena; in AR it would tint the real room.
-    scene.fog = xrKind === 'ar' && renderer.xr.isPresenting ? null : new THREE.Fog(0x120e0c, 7, 21);
+    // Warm battlefield haze that softens the far ruins; none in AR.
+    scene.fog = xrKind === 'ar' && renderer.xr.isPresenting ? null : new THREE.FogExp2(0x5e4635, 0.024);
     if (!renderer.xr.isPresenting) {
       camera.fov = 72;
       camera.updateProjectionMatrix();
